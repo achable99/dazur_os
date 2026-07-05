@@ -34,3 +34,5 @@ supabase/.branches
 *.njsproj
 *.sln
 *.sw?
+# Vercel (metadata local del proyecto vinculado)
+.vercel
