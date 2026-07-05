@@ -154,7 +154,7 @@ export default function CreditLinesPanel() {
                   : 0);
             const next = linePayments.find((p) => p.status === "pending");
             const dueSoon = next
-              ? (new Date(next.due_date).getTime() - Date.now()) / 86400000 <= 7
+              ? (new Date(next.due_date + "T00:00:00").getTime() - Date.now()) / 86400000 <= 7
               : false;
             const isOpen = expanded[l.id];
 

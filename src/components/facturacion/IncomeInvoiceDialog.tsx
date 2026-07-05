@@ -45,11 +45,19 @@ export default function IncomeInvoiceDialog({ invoice, defaultYear, defaultMonth
   });
 
   const sub = Number(subtotal) || 0;
-  const calc = useMemo(() => ({
-    iva: sub * IVA_RATE,
-    isr: sub * ISR_RATE,
-    total: sub + sub * IVA_RATE - sub * ISR_RATE,
-  }), [sub]);
+  // IVA e ISR se redondean a centavos ANTES de calcular el total, para que
+  // subtotal + IVA − ISR siempre cuadre con el desglose mostrado/almacenado.
+  const calc = useMemo(() => {
+    const subR = Number(sub.toFixed(2));
+    const iva = Number((subR * IVA_RATE).toFixed(2));
+    const isr = Number((subR * ISR_RATE).toFixed(2));
+    return {
+      subtotal: subR,
+      iva,
+      isr,
+      total: Number((subR + iva - isr).toFixed(2)),
+    };
+  }, [sub]);
 
   const save = useMutation({
     mutationFn: async () => {
@@ -62,10 +70,10 @@ export default function IncomeInvoiceDialog({ invoice, defaultYear, defaultMonth
         invoice_type: type,
         folio_fiscal: folio.trim().toUpperCase(),
         date: toLocalDateString(date),
-        subtotal: sub,
-        iva: Number(calc.iva.toFixed(2)),
-        isr: Number(calc.isr.toFixed(2)),
-        total: Number(calc.total.toFixed(2)),
+        subtotal: calc.subtotal,
+        iva: calc.iva,
+        isr: calc.isr,
+        total: calc.total,
         month: date.getMonth() + 1,
         year: date.getFullYear(),
         notes: notes.trim() || null,

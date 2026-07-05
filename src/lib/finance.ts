@@ -51,14 +51,13 @@ export function computeTotals(
 ) {
   const applyIva = opts?.applyIva ?? true;
   const applyIsr = opts?.applyIsr ?? true;
-  const iva = applyIva ? subtotal * IVA_RATE : 0;
-  const isr = applyIsr ? subtotal * ISR_RATE : 0;
-  const total = subtotal + iva - isr;
-  return {
-    iva: Number(iva.toFixed(2)),
-    isr: Number(isr.toFixed(2)),
-    total: Number(total.toFixed(2)),
-  };
+  // Se redondea cada componente a centavos ANTES de sumar, para que el total
+  // siempre cuadre con el desglose mostrado/almacenado (subtotal + IVA − ISR).
+  const sub = Number(subtotal.toFixed(2));
+  const iva = applyIva ? Number((sub * IVA_RATE).toFixed(2)) : 0;
+  const isr = applyIsr ? Number((sub * ISR_RATE).toFixed(2)) : 0;
+  const total = Number((sub + iva - isr).toFixed(2));
+  return { iva, isr, total };
 }
 
 export function shiftMonth(year: number, month: number, delta: number) {

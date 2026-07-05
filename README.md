@@ -4,13 +4,35 @@ Panel de administración interno de **DAZUR – Innovación y Obra**. Centraliza
 
 Aplicación SPA construida con React + Vite y respaldada por Supabase (Postgres + Auth). Toda la lógica corre en el cliente; no hay edge functions.
 
+## Estado actual
+
+> Actualizado: julio 2026.
+
+**MVP funcional y desplegado.** Los cinco módulos están implementados y en uso: Flujo de Efectivo, Clientes, Facturación (ingresos, gastos, resumen fiscal y complementos de pago) y Cotizador con PDF, todos detrás de login (single-admin).
+
+- **Despliegue:** publicado en **Vercel** como SPA (rewrites a `index.html` en `vercel.json` para el routing del lado del cliente).
+- **Base de datos:** proyecto Supabase **DAZUR_OS** vinculado (`supabase link`). Hay **13 migraciones** aplicadas en `supabase/migrations`; las últimas tres incorporan el flag **"no deducible"** en facturas de gasto, el **endurecimiento de permisos de las RPCs** y el **trigger de sincronización** de facturas de ingreso con el flujo de efectivo.
+- **Novedades (julio 2026):**
+  - **Facturas de gasto "no deducibles":** cuando el SAT rechaza una deducción, la factura se marca (botón en la fila o switch en el diálogo) en lugar de borrarse; su IVA y total se excluyen del Resumen Fiscal y del traslado de saldo a favor, conservando el registro y el flujo de efectivo.
+  - **Endurecimiento de seguridad:** registro público de usuarios deshabilitado, funciones RPC sin EXECUTE para el rol anónimo, protección de contraseñas filtradas activada y dependencias de producción sin vulnerabilidades (`npm audit`).
+  - **Correcciones de consistencia:** trigger que mantiene el flujo de efectivo en sync al editar/borrar facturas de ingreso cobradas, fix del doble conteo de traslados de IVA en el modo acumulado, invalidaciones de caché del Resumen Fiscal en todas las mutaciones, redondeo a centavos consistente (`subtotal + IVA − ISR = total`) y fechas en hora local en avisos de vencimiento.
+
+### En qué se está trabajando / próximos pasos
+
+- Los complementos de pago se acaban de acotar a **solo trazabilidad** (no afectan flujo ni impuestos); conviene validar el comportamiento con datos reales.
+- El **Cotizador** es lo más reciente; pendiente de pruebas de uso (generación de PDF, adjuntos, historial).
+- **Cobertura de pruebas mínima** — solo existe `src/test/example.test.ts`; falta cubrir las reglas fiscales de `lib/finance.ts` y los flujos críticos.
+- `package.json` sigue en `version: 0.0.0` (sin versionado formal todavía).
+- Aviso de `npm audit` en esbuild/vite (solo afecta al servidor de desarrollo); resolverlo implica migrar a Vite 8 (breaking change).
+
 ## Funcionalidades
 
 - **Flujo de Efectivo** — Ingresos y gastos por mes con saldo arrastrado mes a mes, saldos iniciales y líneas de crédito con tabla de amortización (sistema francés) y registro de pagos.
 - **Clientes** — Alta/edición de clientes con datos fiscales (razón social, RFC, régimen, código postal, etc.).
 - **Facturación**
   - Facturas de ingreso (con cobro y cobro parcial) y facturas de gasto.
-  - Resumen fiscal mensual/acumulado: IVA trasladado, IVA acreditable, ISR retenido y arrastres a favor.
+  - Facturas de gasto marcables como **"no deducibles"** (deducción rechazada por el SAT): se conservan en el registro y el flujo de efectivo, pero su IVA y total se excluyen del resumen fiscal.
+  - Resumen fiscal mensual/acumulado: IVA trasladado, IVA acreditable, ISR retenido y arrastres a favor, con alerta cuando un traslado guardado queda desactualizado.
   - Complementos de pago **solo trazabilidad** (registro de referencia para el SAT que no afecta el flujo ni recalcula impuestos).
 - **Cotizador** — Genera cotizaciones para los clientes registrados y las descarga en **PDF** con el logo de la empresa. Conceptos con descripción, cantidad, precio unitario y total; desglose de impuestos con las mismas reglas que la facturación (IVA 16 %, ISR 1.25 %); numeración secuencial e historial. Opcionalmente permite adjuntar imágenes que se anexan al PDF.
 - **Autenticación** — Login con Supabase Auth y rutas protegidas (un único usuario administrador).

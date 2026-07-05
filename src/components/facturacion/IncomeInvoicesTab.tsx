@@ -98,6 +98,7 @@ export default function IncomeInvoicesTab() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["income_invoices"] });
+      qc.invalidateQueries({ queryKey: ["all_income_invoices_fiscal"] });
       qc.invalidateQueries({ queryKey: ["cash_flow_entries"] });
       toast.success("Factura marcada como pendiente");
     },
@@ -111,6 +112,7 @@ export default function IncomeInvoicesTab() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["income_invoices"] });
+      qc.invalidateQueries({ queryKey: ["all_income_invoices_fiscal"] });
       qc.invalidateQueries({ queryKey: ["cash_flow_entries"] });
       toast.success("Factura eliminada");
       setDeleting(null);
@@ -253,6 +255,9 @@ export default function IncomeInvoicesTab() {
           onClose={() => setEditing(undefined)}
           onSaved={() => {
             qc.invalidateQueries({ queryKey: ["income_invoices"] });
+            qc.invalidateQueries({ queryKey: ["all_income_invoices_fiscal"] });
+            // Editar una factura cobrada actualiza su entrada de flujo (trigger en DB)
+            qc.invalidateQueries({ queryKey: ["cash_flow_entries"] });
             setEditing(undefined);
           }}
         />
@@ -264,6 +269,7 @@ export default function IncomeInvoicesTab() {
           onClose={() => setCollecting(null)}
           onSaved={() => {
             qc.invalidateQueries({ queryKey: ["income_invoices"] });
+            qc.invalidateQueries({ queryKey: ["all_income_invoices_fiscal"] });
             qc.invalidateQueries({ queryKey: ["cash_flow_entries"] });
             setCollecting(null);
           }}
