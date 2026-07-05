@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Plus, Pencil, Trash2, Search } from "lucide-react";
+import { Plus, Pencil, Trash2, Search, Ban } from "lucide-react";
 import { toast } from "sonner";
 import { fmtMXN, EXPENSE_INVOICE_CATEGORIES } from "@/lib/finance";
 import ExpenseInvoiceDialog from "./ExpenseInvoiceDialog";
@@ -21,7 +21,7 @@ import {
 type Invoice = {
   id: string; concept: string; folio_fiscal: string; date: string;
   subtotal: number; iva: number; total: number; category: string;
-  notes: string | null; month: number; year: number;
+  notes: string | null; month: number; year: number; no_deducible: boolean;
 };
 
 const today = new Date();
@@ -58,15 +58,36 @@ export default function ExpenseInvoicesTab() {
 
   const totals = useMemo(() => filtered.reduce((acc, i) => ({
     subtotal: acc.subtotal + Number(i.subtotal),
-    iva: acc.iva + Number(i.iva),
+    // El IVA de facturas no deducibles no se acredita (coincide con el Resumen Fiscal)
+    iva: acc.iva + (i.no_deducible ? 0 : Number(i.iva)),
     total: acc.total + Number(i.total),
-  }), { subtotal: 0, iva: 0, total: 0 }), [filtered]);
+    noDeducibles: acc.noDeducibles + (i.no_deducible ? 1 : 0),
+  }), { subtotal: 0, iva: 0, total: 0, noDeducibles: 0 }), [filtered]);
 
   const uniqueCats = useMemo(() => {
     const s = new Set<string>();
     invoices?.forEach((i) => s.add(i.category));
     return Array.from(s);
   }, [invoices]);
+
+  const toggleNoDeducible = useMutation({
+    mutationFn: async (inv: Invoice) => {
+      const { error } = await supabase
+        .from("expense_invoices").update({ no_deducible: !inv.no_deducible }).eq("id", inv.id);
+      if (error) throw error;
+      return !inv.no_deducible;
+    },
+    onSuccess: (nowNoDeducible) => {
+      qc.invalidateQueries({ queryKey: ["expense_invoices"] });
+      qc.invalidateQueries({ queryKey: ["all_expense_invoices"] });
+      toast.success(nowNoDeducible ? "Factura marcada como no deducible" : "Factura marcada como deducible", {
+        description: nowNoDeducible
+          ? "Su IVA y total ya no cuentan en el Resumen Fiscal."
+          : "Su IVA y total vuelven a contar en el Resumen Fiscal.",
+      });
+    },
+    onError: (e: Error) => toast.error("Error", { description: e.message }),
+  });
 
   const deleteInvoice = useMutation({
     mutationFn: async (id: string) => {
@@ -75,6 +96,7 @@ export default function ExpenseInvoicesTab() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["expense_invoices"] });
+      qc.invalidateQueries({ queryKey: ["all_expense_invoices"] });
       qc.invalidateQueries({ queryKey: ["cash_flow_entries"] });
       toast.success("Factura eliminada");
       setDeleting(null);
@@ -109,6 +131,9 @@ export default function ExpenseInvoicesTab() {
           <Badge variant="secondary" className="font-normal tabular-nums">Subtotal: {fmtMXN(totals.subtotal)}</Badge>
           <Badge variant="secondary" className="font-normal tabular-nums">IVA acreditable: {fmtMXN(totals.iva)}</Badge>
           <Badge className="font-normal tabular-nums">Total: {fmtMXN(totals.total)}</Badge>
+          {totals.noDeducibles > 0 && (
+            <Badge variant="destructive" className="font-normal">{totals.noDeducibles} no deducible{totals.noDeducibles > 1 ? "s" : ""}</Badge>
+          )}
         </div>
 
         {isLoading ? (
@@ -132,15 +157,31 @@ export default function ExpenseInvoicesTab() {
               </TableHeader>
               <TableBody>
                 {filtered.map((i) => (
-                  <TableRow key={i.id}>
-                    <TableCell className="max-w-[200px] truncate">{i.concept}</TableCell>
+                  <TableRow key={i.id} className={i.no_deducible ? "opacity-60" : undefined}>
+                    <TableCell className="max-w-[240px]">
+                      <div className="flex items-center gap-2">
+                        <span className="truncate">{i.concept}</span>
+                        {i.no_deducible && (
+                          <Badge variant="destructive" className="font-normal shrink-0">No deducible</Badge>
+                        )}
+                      </div>
+                    </TableCell>
                     <TableCell className="font-mono text-xs">{i.folio_fiscal}</TableCell>
                     <TableCell className="text-sm tabular-nums">{i.date}</TableCell>
                     <TableCell className="text-right tabular-nums">{fmtMXN(i.subtotal)}</TableCell>
-                    <TableCell className="text-right tabular-nums">{fmtMXN(i.iva)}</TableCell>
+                    <TableCell className={`text-right tabular-nums ${i.no_deducible ? "line-through text-muted-foreground" : ""}`}>{fmtMXN(i.iva)}</TableCell>
                     <TableCell className="text-right tabular-nums font-medium">{fmtMXN(i.total)}</TableCell>
                     <TableCell><Badge variant="secondary" className="font-normal">{i.category}</Badge></TableCell>
                     <TableCell className="text-right">
+                      <Button
+                        variant="ghost" size="icon"
+                        className={`h-8 w-8 ${i.no_deducible ? "text-destructive hover:text-destructive" : ""}`}
+                        title={i.no_deducible ? "Volver a marcar como deducible" : "Marcar como no deducible (el SAT rechazó la deducción)"}
+                        disabled={toggleNoDeducible.isPending && toggleNoDeducible.variables?.id === i.id}
+                        onClick={() => toggleNoDeducible.mutate(i)}
+                      >
+                        <Ban className="h-4 w-4" />
+                      </Button>
                       <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setEditing(i)}>
                         <Pencil className="h-4 w-4" />
                       </Button>
@@ -164,6 +205,7 @@ export default function ExpenseInvoicesTab() {
           onClose={() => setEditing(undefined)}
           onSaved={() => {
             qc.invalidateQueries({ queryKey: ["expense_invoices"] });
+            qc.invalidateQueries({ queryKey: ["all_expense_invoices"] });
             qc.invalidateQueries({ queryKey: ["cash_flow_entries"] });
             setEditing(undefined);
           }}

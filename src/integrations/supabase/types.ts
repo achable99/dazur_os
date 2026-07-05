@@ -225,6 +225,7 @@ export type Database = {
           id: string
           iva: number
           month: number
+          no_deducible: boolean
           notes: string | null
           subtotal: number
           total: number
@@ -239,6 +240,7 @@ export type Database = {
           id?: string
           iva?: number
           month: number
+          no_deducible?: boolean
           notes?: string | null
           subtotal: number
           total: number
@@ -253,6 +255,7 @@ export type Database = {
           id?: string
           iva?: number
           month?: number
+          no_deducible?: boolean
           notes?: string | null
           subtotal?: number
           total?: number

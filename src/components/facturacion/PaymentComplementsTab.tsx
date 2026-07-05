@@ -102,6 +102,7 @@ export default function PaymentComplementsTab() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["payment_complements"] });
       qc.invalidateQueries({ queryKey: ["income_invoices"] });
+      qc.invalidateQueries({ queryKey: ["all_income_invoices_fiscal"] });
       qc.invalidateQueries({ queryKey: ["cash_flow_entries"] });
       toast.success("Complemento eliminado");
       setDeleting(null);
@@ -112,6 +113,7 @@ export default function PaymentComplementsTab() {
   const invalidateAll = () => {
     qc.invalidateQueries({ queryKey: ["payment_complements"] });
     qc.invalidateQueries({ queryKey: ["income_invoices"] });
+    qc.invalidateQueries({ queryKey: ["all_income_invoices_fiscal"] });
     qc.invalidateQueries({ queryKey: ["cash_flow_entries"] });
     qc.invalidateQueries({ queryKey: ["complement_allocations"] });
     qc.invalidateQueries({ queryKey: ["client_invoices"] });

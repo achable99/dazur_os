@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import DatePicker from "@/components/DatePicker";
 import { toast } from "sonner";
@@ -14,6 +15,7 @@ import { fmtMXN, EXPENSE_INVOICE_CATEGORIES, toLocalDateString } from "@/lib/fin
 type Invoice = {
   id: string; concept: string; folio_fiscal: string; date: string;
   subtotal: number; iva: number; total: number; category: string; notes: string | null;
+  no_deducible: boolean;
 };
 
 interface Props {
@@ -34,25 +36,30 @@ export default function ExpenseInvoiceDialog({ invoice, defaultYear, defaultMont
   const [iva, setIva] = useState(invoice?.iva?.toString() ?? "0");
   const [category, setCategory] = useState(invoice?.category ?? EXPENSE_INVOICE_CATEGORIES[0]);
   const [notes, setNotes] = useState(invoice?.notes ?? "");
+  const [noDeducible, setNoDeducible] = useState(invoice?.no_deducible ?? false);
 
-  const total = useMemo(() => (Number(subtotal) || 0) + (Number(iva) || 0), [subtotal, iva]);
+  // Subtotal e IVA se redondean a centavos ANTES de sumar, para que el total
+  // almacenado siempre cuadre con el desglose (subtotal + IVA).
+  const subR = useMemo(() => Number((Number(subtotal) || 0).toFixed(2)), [subtotal]);
+  const ivaR = useMemo(() => Number((Number(iva) || 0).toFixed(2)), [iva]);
+  const total = useMemo(() => Number((subR + ivaR).toFixed(2)), [subR, ivaR]);
 
   const save = useMutation({
     mutationFn: async () => {
       if (!concept.trim()) throw new Error("Concepto requerido");
       if (!folio.trim()) throw new Error("Folio fiscal requerido");
       if (!date) throw new Error("Fecha requerida");
-      const sub = Number(subtotal);
-      if (!sub || sub <= 0) throw new Error("Subtotal inválido");
+      if (!subR || subR <= 0) throw new Error("Subtotal inválido");
       const payload = {
         concept: concept.trim(),
         folio_fiscal: folio.trim().toUpperCase(),
         date: toLocalDateString(date),
-        subtotal: sub,
-        iva: Number(iva) || 0,
-        total: Number(total.toFixed(2)),
+        subtotal: subR,
+        iva: ivaR,
+        total,
         category,
         notes: notes.trim() || null,
+        no_deducible: noDeducible,
         month: date.getMonth() + 1,
         year: date.getFullYear(),
       };
@@ -116,6 +123,15 @@ export default function ExpenseInvoiceDialog({ invoice, defaultYear, defaultMont
           <div className="space-y-1.5">
             <Label htmlFor="notes">Notas</Label>
             <Textarea id="notes" value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={500} rows={2} />
+          </div>
+          <div className="flex items-center justify-between rounded-md border p-3">
+            <div className="space-y-0.5">
+              <Label htmlFor="no-deducible">No deducible</Label>
+              <p className="text-xs text-muted-foreground">
+                El SAT rechazó esta deducción: su IVA y total se excluyen del Resumen Fiscal, pero se conserva el registro y el flujo de efectivo.
+              </p>
+            </div>
+            <Switch id="no-deducible" checked={noDeducible} onCheckedChange={setNoDeducible} />
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>Cancelar</Button>

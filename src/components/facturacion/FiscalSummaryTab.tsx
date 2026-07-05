@@ -9,7 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Info, ArrowRight, Check, Pencil, X } from "lucide-react";
+import { Info, ArrowRight, Check, Pencil, X, TriangleAlert } from "lucide-react";
 import { fmtMXN, monthLabel, shiftMonth } from "@/lib/finance";
 import { toast } from "sonner";
 import {
@@ -23,7 +23,7 @@ import {
 const today = new Date();
 
 type IncomeInv = { iva: number; isr: number; total: number; is_collected: boolean; year: number; month: number; collected_date: string | null };
-type ExpenseInv = { iva: number; total: number; year: number; month: number };
+type ExpenseInv = { iva: number; total: number; year: number; month: number; no_deducible: boolean };
 type Carryover = { from_month: number; from_year: number; to_month: number; to_year: number; iva_amount: number; isr_amount: number; iva_pending_amount: number; iva_favor_amount: number };
 type PeriodAdjustment = { year: number; month: number; iva_acreditable_adjustment: number };
 
@@ -50,7 +50,7 @@ export default function FiscalSummaryTab() {
     queryKey: ["all_expense_invoices", year],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from("expense_invoices").select("iva,total,year,month").eq("year", year);
+        .from("expense_invoices").select("iva,total,year,month,no_deducible").eq("year", year);
       if (error) throw error;
       return data as ExpenseInv[];
     },
@@ -111,7 +111,9 @@ export default function FiscalSummaryTab() {
       if (accumulated) return i.year === year && i.month <= month;
       return i.year === year && i.month === month;
     });
-    const exp = filterPeriod(expenses);
+    // Las facturas marcadas como no deducibles (deducción rechazada por el SAT)
+    // se excluyen del gasto deducible y del IVA acreditable, pero no del flujo de efectivo.
+    const exp = filterPeriod(expenses).filter((i) => !i.no_deducible);
     const adj = filterPeriod(adjustments);
 
     const ingresosCobrados = collected.reduce((s, i) => s + Number(i.total), 0);
@@ -129,10 +131,15 @@ export default function FiscalSummaryTab() {
     // No se arrastran "IVA pendiente" ni "ISR pendiente": aparecen automáticamente
     // en el mes en que se cobre la factura (via collected_date).
     let carryIvaFavor = 0;
+    // En modo acumulado sólo se restan traslados que ENTRAN desde fuera del rango
+    // (p.ej. diciembre del año anterior). Un traslado cuyo mes de origen está dentro
+    // del rango acumulado (from_year === year) ya está implícito en las sumas de
+    // IVA trasladado/acreditable del propio rango; volver a restarlo duplicaría
+    // el saldo a favor.
     const relevantCarryovers = carryovers
       ? carryovers.filter((c) =>
           accumulated
-            ? c.to_year === year && c.to_month <= month
+            ? c.to_year === year && c.to_month <= month && c.from_year !== year
             : c.to_year === year && c.to_month === month,
         )
       : [];
@@ -164,13 +171,22 @@ export default function FiscalSummaryTab() {
   const isFavorOnly = true;
   const hasBoth = false;
 
-  const alreadyCarried = useMemo(() => {
-    if (!carryovers) return false;
-    return carryovers.some(
+  const storedCarryover = useMemo(() => {
+    if (!carryovers) return undefined;
+    return carryovers.find(
       (c) => c.from_year === year && c.from_month === month
         && c.to_year === next.year && c.to_month === next.month,
     );
   }, [carryovers, year, month, next.year, next.month]);
+  const alreadyCarried = !!storedCarryover;
+  const storedCarryFavor = Number(storedCarryover?.iva_favor_amount ?? 0);
+
+  // El traslado guardado es una foto al momento de confirmarlo: si después se
+  // editan facturas o se marcan como no deducibles, queda obsoleto y hay que
+  // volver a trasladar. Detectamos la discrepancia comparando contra el saldo
+  // a favor recalculado (incluye el caso en que ahora ya no hay saldo a favor).
+  const carryMismatch =
+    !accumulated && alreadyCarried && Math.abs(storedCarryFavor - Math.abs(ivaToCarry)) > 0.005;
 
   const carryMutation = useMutation({
     mutationFn: async () => {
@@ -341,7 +357,7 @@ export default function FiscalSummaryTab() {
                         <Info className="h-3.5 w-3.5 text-muted-foreground cursor-help" />
                       </TooltipTrigger>
                       <TooltipContent className="max-w-xs">
-                        Corrige el IVA acreditable del mes (ej. facturas no registradas o no deducibles). Afecta el IVA a pagar/a favor y el traslado al siguiente mes.
+                        Corrige el IVA acreditable del mes (ej. facturas no registradas). Las facturas marcadas como no deducibles ya se excluyen automáticamente — no las ajustes aquí. Afecta el IVA a pagar/a favor y el traslado al siguiente mes.
                       </TooltipContent>
                     </Tooltip>
                   </TooltipProvider>
@@ -405,9 +421,20 @@ export default function FiscalSummaryTab() {
                 className="text-success"
               />
             )}
+            {carryMismatch && (
+              <Alert className="border-amber-500/50 text-amber-600 dark:text-amber-500 [&>svg]:text-amber-600 dark:[&>svg]:text-amber-500">
+                <TriangleAlert className="h-4 w-4" />
+                <AlertDescription>
+                  El traslado de IVA guardado hacia {monthLabel(next.month, next.year)}{" "}
+                  (<span className="tabular-nums font-medium">{fmtMXN(storedCarryFavor)}</span>) ya no coincide con el
+                  cálculo actual (<span className="tabular-nums font-medium">{fmtMXN(Math.abs(ivaToCarry))}</span>),
+                  probablemente por facturas editadas o marcadas como no deducibles. Usa "Actualizar traslado" para corregirlo.
+                </AlertDescription>
+              </Alert>
+            )}
             <Button
               variant="outline" size="sm" className="w-full"
-              disabled={accumulated || !hasSomethingToCarry}
+              disabled={accumulated || (!hasSomethingToCarry && !carryMismatch)}
               onClick={() => setConfirmCarry(true)}
             >
               <ArrowRight className="h-4 w-4 mr-1" />
@@ -421,7 +448,7 @@ export default function FiscalSummaryTab() {
             {accumulated && (
               <p className="text-xs text-muted-foreground">Desactiva el modo acumulado para trasladar.</p>
             )}
-            {!accumulated && !hasSomethingToCarry && (
+            {!accumulated && !hasSomethingToCarry && !carryMismatch && (
               <p className="text-xs text-muted-foreground">No hay saldo a favor de IVA para trasladar.</p>
             )}
 
