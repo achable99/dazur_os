@@ -9,7 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import DatePicker from "@/components/DatePicker";
 import { toast } from "sonner";
-import { fmtMXN, INVOICE_TYPES, IVA_RATE, ISR_RATE, toLocalDateString } from "@/lib/finance";
+import { fmtMXN, INVOICE_TYPES, computeTotals, toLocalDateString } from "@/lib/finance";
 
 type Invoice = {
   id: string; client_id: string; folio_fiscal: string; invoice_type: string;
@@ -38,26 +38,23 @@ export default function IncomeInvoiceDialog({ invoice, defaultYear, defaultMonth
   const { data: clients } = useQuery({
     queryKey: ["clients"],
     queryFn: async () => {
-      const { data, error } = await supabase.from("clients").select("id, razon_social, rfc").order("razon_social");
+      const { data, error } = await supabase.from("clients").select("id, razon_social, rfc, tipo_persona").order("razon_social");
       if (error) throw error;
-      return data as { id: string; razon_social: string; rfc: string }[];
+      return data as { id: string; razon_social: string; rfc: string; tipo_persona: "fisica" | "moral" | null }[];
     },
   });
 
+  const selectedClient = clients?.find((c) => c.id === clientId);
+  // La retención de ISR solo aplica a clientes persona moral. Sin cliente
+  // seleccionado, se asume que no aplica (persona física por defecto).
+  const applyIsr = selectedClient?.tipo_persona === "moral";
+
   const sub = Number(subtotal) || 0;
-  // IVA e ISR se redondean a centavos ANTES de calcular el total, para que
-  // subtotal + IVA − ISR siempre cuadre con el desglose mostrado/almacenado.
   const calc = useMemo(() => {
     const subR = Number(sub.toFixed(2));
-    const iva = Number((subR * IVA_RATE).toFixed(2));
-    const isr = Number((subR * ISR_RATE).toFixed(2));
-    return {
-      subtotal: subR,
-      iva,
-      isr,
-      total: Number((subR + iva - isr).toFixed(2)),
-    };
-  }, [sub]);
+    const { iva, isr, total } = computeTotals(subR, { applyIsr });
+    return { subtotal: subR, iva, isr, total };
+  }, [sub, applyIsr]);
 
   const save = useMutation({
     mutationFn: async () => {
@@ -137,8 +134,8 @@ export default function IncomeInvoiceDialog({ invoice, defaultYear, defaultMonth
               <div className="tabular-nums font-medium">{fmtMXN(calc.iva)}</div>
             </div>
             <div>
-              <div className="text-xs text-muted-foreground">ISR (1.25%)</div>
-              <div className="tabular-nums font-medium">{fmtMXN(calc.isr)}</div>
+              <div className="text-xs text-muted-foreground">{applyIsr ? "ISR (1.25%)" : "ISR"}</div>
+              <div className="tabular-nums font-medium">{applyIsr ? fmtMXN(calc.isr) : "No aplica"}</div>
             </div>
             <div>
               <div className="text-xs text-muted-foreground">Total</div>
