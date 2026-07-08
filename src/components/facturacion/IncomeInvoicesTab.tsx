@@ -57,14 +57,18 @@ export default function IncomeInvoicesTab() {
   const { data: clients } = useQuery({
     queryKey: ["clients"],
     queryFn: async () => {
-      const { data, error } = await supabase.from("clients").select("id, razon_social, rfc").order("razon_social");
+      // NOTA: incluye tipo_persona aunque este componente no lo use directamente —
+      // TODAS las queries con key ["clients"] deben compartir el mismo select
+      // (superset), ya que React Query cachea por key y sirve la última respuesta
+      // a cualquier consumidor de esa key (ver IncomeInvoiceDialog).
+      const { data, error } = await supabase.from("clients").select("id, razon_social, rfc, tipo_persona").order("razon_social");
       if (error) throw error;
-      return data as { id: string; razon_social: string; rfc: string }[];
+      return data as { id: string; razon_social: string; rfc: string; tipo_persona: "fisica" | "moral" | null }[];
     },
   });
 
   const clientMap = useMemo(() => {
-    const m = new Map<string, { razon_social: string; rfc: string }>();
+    const m = new Map<string, { razon_social: string; rfc: string; tipo_persona: "fisica" | "moral" | null }>();
     clients?.forEach((c) => m.set(c.id, c));
     return m;
   }, [clients]);

@@ -50,9 +50,11 @@ export default function PaymentComplementDialog({ complement, defaultYear, defau
   const { data: clients } = useQuery({
     queryKey: ["clients"],
     queryFn: async () => {
-      const { data, error } = await supabase.from("clients").select("id, razon_social, rfc").order("razon_social");
+      // NOTA: incluye tipo_persona para compartir el select con el resto de
+      // consumidores de la key ["clients"] (ver IncomeInvoiceDialog).
+      const { data, error } = await supabase.from("clients").select("id, razon_social, rfc, tipo_persona").order("razon_social");
       if (error) throw error;
-      return data as { id: string; razon_social: string; rfc: string }[];
+      return data as { id: string; razon_social: string; rfc: string; tipo_persona: "fisica" | "moral" | null }[];
     },
   });
 

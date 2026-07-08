@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeTotals, resicoIsr, resicoProvision } from "@/lib/finance";
+import { computeTotals, resicoIsr, resicoProvision, computeIsrBrief, pctLabel } from "@/lib/finance";
 
 describe("computeTotals", () => {
   it("applies IVA and ISR when applyIsr is true", () => {
@@ -140,5 +140,47 @@ describe("resicoProvision", () => {
     const r = resicoProvision(1000, 100);
     expect(r.total).toBe(25);
     expect(r.propia).toBe(0);
+  });
+});
+
+describe("computeIsrBrief", () => {
+  it("matches resicoIsr + resicoProvision for the same base/retenido (monthly)", () => {
+    const invoices = [
+      { subtotal: 60000, isr: 750 },
+      { subtotal: 51679.2, isr: 645.99 },
+    ];
+    const brief = computeIsrBrief(invoices, "monthly");
+    const base = invoices.reduce((s, i) => s + i.subtotal, 0);
+    const retenido = invoices.reduce((s, i) => s + i.isr, 0);
+    const expectedIsr = resicoIsr(base, "monthly");
+    const expectedProvision = resicoProvision(base, retenido);
+    expect(brief.base).toBe(base);
+    expect(brief.retenido).toBe(retenido);
+    expect(brief.rate).toBe(expectedIsr.rate);
+    expect(brief.isr).toBe(expectedIsr.isr);
+    expect(brief.exceeded).toBe(expectedIsr.exceeded);
+    expect(brief.total).toBe(expectedProvision.total);
+    expect(brief.propia).toBe(expectedProvision.propia);
+    expect(brief.sobrante).toBe(Math.max(0, Number((expectedProvision.total - expectedIsr.isr).toFixed(2))));
+  });
+
+  it("empty invoice list -> all zeros", () => {
+    const brief = computeIsrBrief([], "annual");
+    expect(brief.base).toBe(0);
+    expect(brief.retenido).toBe(0);
+    expect(brief.isr).toBe(0);
+    expect(brief.total).toBe(0);
+    expect(brief.propia).toBe(0);
+    expect(brief.sobrante).toBe(0);
+  });
+});
+
+describe("pctLabel", () => {
+  it("formats 0.0125 as 1.25%", () => {
+    expect(pctLabel(0.0125)).toBe("1.25%");
+  });
+
+  it("formats 0.025 as 2.50%", () => {
+    expect(pctLabel(0.025)).toBe("2.50%");
   });
 });

@@ -80,6 +80,29 @@ export function resicoProvision(base: number, retenido: number) {
   return { total, propia };
 }
 
+/** Formats a rate (e.g. 0.0125) as a percentage label with 2 decimals: "1.25%". */
+export function pctLabel(rate: number): string {
+  return `${(rate * 100).toFixed(2)}%`;
+}
+
+/**
+ * Resumen de ISR RESICO para un conjunto de facturas cobradas (base = Σsubtotal,
+ * retenido = Σisr), reutilizado tanto por el resumen fiscal principal como por
+ * el brief anual mostrado/exportado en el PDF de declaración. `isrACargo` se
+ * deriva por separado en el llamador (isrCausado − retenido, sin negativos).
+ */
+export function computeIsrBrief(
+  invoices: { subtotal: number; isr: number }[],
+  period: "monthly" | "annual",
+) {
+  const base = invoices.reduce((s, i) => s + Number(i.subtotal), 0);
+  const retenido = invoices.reduce((s, i) => s + Number(i.isr), 0);
+  const { rate, isr, exceeded } = resicoIsr(base, period);
+  const { total, propia } = resicoProvision(base, retenido);
+  const sobrante = Math.max(0, Number((total - isr).toFixed(2)));
+  return { base, rate, isr, exceeded, retenido, total, propia, sobrante };
+}
+
 export const periodKey = (y: number, m: number) => y * 100 + m;
 
 /** Format a Date as "23 de Junio de 2026" (long Spanish date). */

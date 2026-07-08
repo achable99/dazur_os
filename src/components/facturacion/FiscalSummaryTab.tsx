@@ -9,9 +9,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Info, ArrowRight, Check, Pencil, X, TriangleAlert } from "lucide-react";
-import { fmtMXN, monthLabel, shiftMonth, resicoIsr, resicoProvision } from "@/lib/finance";
+import { Info, ArrowRight, Check, Pencil, X, TriangleAlert, FileDown } from "lucide-react";
+import { fmtMXN, monthLabel, shiftMonth, computeIsrBrief, pctLabel, ISR_RATE, ISR_PROVISION_RATE, MONTHS_ES } from "@/lib/finance";
 import { toast } from "sonner";
+import { downloadPdfDocument } from "@/lib/pdfDownload";
+import DeclarationPdf, { type DeclarationPdfData } from "./DeclarationPdf";
 import {
   Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
 } from "@/components/ui/tooltip";
@@ -27,12 +29,27 @@ type ExpenseInv = { iva: number; total: number; year: number; month: number; no_
 type Carryover = { from_month: number; from_year: number; to_month: number; to_year: number; iva_amount: number; isr_amount: number; iva_pending_amount: number; iva_favor_amount: number };
 type PeriodAdjustment = { year: number; month: number; iva_acreditable_adjustment: number };
 
+/**
+ * Facturas cobradas dentro del ejercicio `year`, hasta el mes `month` inclusive
+ * (siempre semántica ANUAL, independiente del toggle "acumulado" de la UI).
+ * Reconocidas por collected_date (flujo de efectivo). Se usa tanto para el
+ * brief anual de ISR mostrado/exportado en el PDF de declaración mensual.
+ */
+function filterAnnualCollected(incomes: IncomeInv[] | undefined, year: number, month: number): IncomeInv[] {
+  return (incomes ?? []).filter((i) => {
+    if (!i.is_collected || !i.collected_date) return false;
+    const d = new Date(i.collected_date + "T00:00:00");
+    return d.getFullYear() === year && d.getMonth() + 1 <= month;
+  });
+}
+
 export default function FiscalSummaryTab() {
   const qc = useQueryClient();
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth() + 1);
   const [accumulated, setAccumulated] = useState(false);
   const [confirmCarry, setConfirmCarry] = useState(false);
+  const [generatingPdf, setGeneratingPdf] = useState(false);
   const [editingAdjustment, setEditingAdjustment] = useState(false);
   const [adjustmentInput, setAdjustmentInput] = useState("");
 
@@ -122,21 +139,25 @@ export default function FiscalSummaryTab() {
     const ivaAcreditableBase = exp.reduce((s, i) => s + Number(i.iva), 0);
     const ivaAcreditableAjuste = adj.reduce((s, a) => s + Number(a.iva_acreditable_adjustment), 0);
     const ivaAcreditable = ivaAcreditableBase + ivaAcreditableAjuste;
-    const isrRetenido = collected.reduce((s, i) => s + Number(i.isr), 0);
     const ivaPendiente = pending.reduce((s, i) => s + Number(i.iva), 0);
     const isrPendiente = pending.reduce((s, i) => s + Number(i.isr), 0);
+    const totalPendiente = pending.reduce((s, i) => s + Number(i.total), 0);
 
     // ISR RESICO: siempre se aparta el 2.5% del subtotal cobrado (tasa máxima
     // de la tabla), repartido entre lo retenido por clientes persona moral
     // (1.25%) y la provisión propia del negocio. El ISR causado del período
     // (tabla RESICO, tasa según lo acumulado) se cubre con esa provisión total;
     // el sobrante queda apartado para la declaración anual.
-    const isrBase = collected.reduce((s, i) => s + Number(i.subtotal), 0);
-    const { rate: isrRate, isr: isrCausado, exceeded: isrExceeded } =
-      resicoIsr(isrBase, accumulated ? "annual" : "monthly");
-    const { total: provisionTotal, propia: provisionPropia } = resicoProvision(isrBase, isrRetenido);
+    const brief = computeIsrBrief(collected, accumulated ? "annual" : "monthly");
+    const isrBase = brief.base;
+    const isrRate = brief.rate;
+    const isrCausado = brief.isr;
+    const isrExceeded = brief.exceeded;
+    const isrRetenido = brief.retenido;
+    const provisionTotal = brief.total;
+    const provisionPropia = brief.propia;
+    const provisionSobrante = brief.sobrante;
     const isrACargo = Math.max(0, Number((isrCausado - isrRetenido).toFixed(2)));
-    const provisionSobrante = Math.max(0, Number((provisionTotal - isrCausado).toFixed(2)));
 
     // Bajo flujo de efectivo (México): IVA e ISR se reconocen cuando se cobran,
     // por lo que sólo trasladamos saldo a FAVOR de IVA al siguiente período.
@@ -171,7 +192,7 @@ export default function FiscalSummaryTab() {
       isrRetenido,
       isrBase, isrRate, isrCausado, isrExceeded, isrACargo,
       provisionTotal, provisionPropia, provisionSobrante,
-      ivaPendiente, isrPendiente,
+      ivaPendiente, isrPendiente, totalPendiente,
       carryIva, carryIvaPending: 0, carryIvaFavor, carryIsr: 0,
     };
   }, [incomes, expenses, carryovers, adjustments, year, month, accumulated]);
@@ -259,13 +280,69 @@ export default function FiscalSummaryTab() {
     adjustmentMutation.mutate(parsed);
   };
 
+  const handleDownloadDeclarationPdf = async () => {
+    setGeneratingPdf(true);
+    try {
+      const periodLabel = accumulated
+        ? `Ejercicio ${year} (${MONTHS_ES[0]} – ${MONTHS_ES[month - 1]})`
+        : monthLabel(month, year);
+      // Brief del acumulado anual de ISR: siempre con semántica anual (independiente
+      // del toggle "acumulado" de la UI), calculado aquí al momento del clic —
+      // no forma parte del `summary` memoizado — para mostrar en el PDF mensual
+      // cuánto se lleva provisionado/causado en el ejercicio hasta el mes seleccionado.
+      const annualBrief = computeIsrBrief(filterAnnualCollected(incomes, year, month), "annual");
+      const data: DeclarationPdfData = {
+        isAnnual: accumulated,
+        periodLabel,
+        generatedAt: new Date(),
+        ingresosCobrados: summary.ingresosCobrados,
+        isrBase: summary.isrBase,
+        totalPendiente: summary.totalPendiente,
+        ivaTrasladado: summary.ivaTrasladado,
+        ivaAcreditableBase: summary.ivaAcreditableBase,
+        ivaAcreditableAjuste: summary.ivaAcreditableAjuste,
+        ivaAcreditable: summary.ivaAcreditable,
+        carryIvaFavor: summary.carryIvaFavor,
+        ivaResultado: summary.ivaResultado,
+        isrRate: summary.isrRate,
+        isrCausado: summary.isrCausado,
+        isrExceeded: summary.isrExceeded,
+        isrRetenido: summary.isrRetenido,
+        provisionPropia: summary.provisionPropia,
+        provisionTotal: summary.provisionTotal,
+        isrACargo: summary.isrACargo,
+        provisionSobrante: summary.provisionSobrante,
+        annualBrief,
+      };
+      const filename = accumulated
+        ? `Simulacion-Declaracion-Anual-${year}.pdf`
+        : `Simulacion-Declaracion-Mensual-${MONTHS_ES[month - 1]}-${year}.pdf`;
+      await downloadPdfDocument(<DeclarationPdf data={data} />, filename);
+    } catch (e) {
+      toast.error("Error al generar el PDF", { description: (e as Error).message });
+    } finally {
+      setGeneratingPdf(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <MonthSelector year={year} month={month} onChange={(y, m) => { setYear(y); setMonth(m); }} />
-        <div className="flex items-center gap-2">
-          <Switch id="acc" checked={accumulated} onCheckedChange={setAccumulated} />
-          <Label htmlFor="acc" className="text-sm cursor-pointer">Acumulado del ejercicio</Label>
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2">
+            <Switch id="acc" checked={accumulated} onCheckedChange={setAccumulated} />
+            <Label htmlFor="acc" className="text-sm cursor-pointer">Acumulado del ejercicio</Label>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleDownloadDeclarationPdf}
+            disabled={generatingPdf || isLoading}
+          >
+            <FileDown className="h-4 w-4 mr-1" />
+            {generatingPdf ? "Generando…" : "Simular declaración"}
+          </Button>
         </div>
       </div>
 
@@ -417,14 +494,14 @@ export default function FiscalSummaryTab() {
             <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">ISR del Período</h3>
             <Row label="Ingresos cobrados (base sin IVA)" value={summary.isrBase} />
             <Row
-              label={`ISR del ${accumulated ? "ejercicio" : "mes"} (${(summary.isrRate * 100).toFixed(2)}%)`}
+              label={`ISR del ${accumulated ? "ejercicio" : "mes"} (${pctLabel(summary.isrRate)})`}
               value={summary.isrCausado}
             />
 
             <div className="border-t border-border pt-3 space-y-3">
-              <Row label="Retenido por clientes (1.25% morales)" value={summary.isrRetenido} />
+              <Row label={`Retenido por clientes (${pctLabel(ISR_RATE)} morales)`} value={summary.isrRetenido} />
               <Row label="Provisión propia (a apartar)" value={summary.provisionPropia} />
-              <Row label="Total provisionado (2.50%)" value={summary.provisionTotal} className="!font-semibold" />
+              <Row label={`Total provisionado (${pctLabel(ISR_PROVISION_RATE)})`} value={summary.provisionTotal} className="!font-semibold" />
             </div>
 
             <div className="border-t border-border pt-3 space-y-3">
@@ -436,13 +513,22 @@ export default function FiscalSummaryTab() {
               <Alert className="border-amber-500/50 text-amber-600 dark:text-amber-500 [&>svg]:text-amber-600 dark:[&>svg]:text-amber-500">
                 <TriangleAlert className="h-4 w-4" />
                 <AlertDescription>
-                  La base cobrada rebasa el tope de $3,500,000 de RESICO. Se aplicó la tasa máxima (2.5%).
+                  La base cobrada rebasa el tope de $3,500,000 de RESICO. Se aplicó la tasa máxima ({pctLabel(ISR_PROVISION_RATE)}).
+                </AlertDescription>
+              </Alert>
+            )}
+
+            {summary.isrRetenido > summary.provisionTotal + 0.005 && (
+              <Alert className="border-amber-500/50 text-amber-600 dark:text-amber-500 [&>svg]:text-amber-600 dark:[&>svg]:text-amber-500">
+                <TriangleAlert className="h-4 w-4" />
+                <AlertDescription>
+                  Lo retenido excede el {pctLabel(ISR_PROVISION_RATE)} de la base del período; revisa los montos de ISR de las facturas.
                 </AlertDescription>
               </Alert>
             )}
 
             <p className="text-xs text-muted-foreground">
-              De cada factura cobrada se aparta el 2.5% (retención de clientes persona moral + provisión propia).
+              De cada factura cobrada se aparta el {pctLabel(ISR_PROVISION_RATE)} (retención de clientes persona moral + provisión propia).
               Con eso se cubre el ISR del período según la tabla RESICO, y el sobrante queda provisionado para la
               declaración anual.
             </p>

@@ -1,4 +1,3 @@
-import { pdf } from "@react-pdf/renderer";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -10,6 +9,7 @@ import {
 import { Download, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { fmtMXN } from "@/lib/finance";
+import { downloadPdfDocument } from "@/lib/pdfDownload";
 import QuotePdf, { type QuotePdfData } from "./QuotePdf";
 import type { QuoteForEdit } from "./QuoteForm";
 
@@ -85,15 +85,7 @@ export default function QuotesList({ onEdit }: Props) {
         notes: q.notes,
         images: [],
       };
-      const blob = await pdf(<QuotePdf data={data} />).toBlob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `Cotizacion-${q.number}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      await downloadPdfDocument(<QuotePdf data={data} />, `Cotizacion-${q.number}.pdf`);
     },
     onError: (e: Error) => toast.error("Error al generar PDF", { description: e.message }),
   });
