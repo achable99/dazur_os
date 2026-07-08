@@ -1,6 +1,7 @@
 import { Document, Page, View, Text, Image, StyleSheet } from "@react-pdf/renderer";
-import { ISSUER, BANK_INFO } from "@/lib/issuer";
+import { BANK_INFO } from "@/lib/issuer";
 import { fmtMXN, longDateEs } from "@/lib/finance";
+import { COLORS, pdfSharedStyles, IssuerHeader } from "@/components/pdf/pdfShared";
 
 export type QuoteItemPdf = {
   description: string;
@@ -30,23 +31,7 @@ export type QuotePdfData = {
   images?: string[];
 };
 
-const COLORS = {
-  headerBlue: "#4472C4",
-  rowBlue: "#D9E1F2",
-  boxBg: "#D9D9D9",
-  boxBorder: "#A6A6A6",
-  text: "#1F2937",
-  muted: "#4B5563",
-};
-
 const styles = StyleSheet.create({
-  page: { paddingHorizontal: 40, paddingTop: 28, paddingBottom: 40, fontSize: 9, color: COLORS.text, fontFamily: "Helvetica" },
-  headerRow: { flexDirection: "row", alignItems: "center", marginBottom: 6 },
-  logo: { width: 90, height: 90, objectFit: "contain" },
-  headerText: { flex: 1, textAlign: "center", paddingHorizontal: 8 },
-  companyName: { fontSize: 12, fontFamily: "Helvetica-Bold" },
-  companyLine: { fontSize: 9, fontFamily: "Helvetica-Bold" },
-  companyMuted: { fontSize: 8, color: COLORS.muted },
   metaRight: { textAlign: "right", marginTop: 10 },
   metaDate: { fontSize: 9 },
   metaNumber: { fontSize: 11, fontFamily: "Helvetica-Bold", marginTop: 4 },
@@ -81,21 +66,6 @@ function qtyLabel(quantity: number, unit: string | null): string {
   return quantity === 1 ? unit : `${q} ${unit}`;
 }
 
-function Header() {
-  return (
-    <View style={styles.headerRow}>
-      <Image style={styles.logo} src={ISSUER.logo} />
-      <View style={styles.headerText}>
-        <Text style={styles.companyName}>{ISSUER.name}</Text>
-        <Text style={styles.companyLine}>{ISSUER.tagline1}</Text>
-        <Text style={styles.companyLine}>{ISSUER.tagline2}</Text>
-        <Text style={styles.companyMuted}>{ISSUER.address}</Text>
-        <Text style={styles.companyMuted}>{ISSUER.contact}</Text>
-      </View>
-    </View>
-  );
-}
-
 export default function QuotePdf({ data }: { data: QuotePdfData }) {
   const noteLines = [
     data.validity ? `VIGENCIA DE LA COTIZACION: ${data.validity}` : null,
@@ -107,8 +77,8 @@ export default function QuotePdf({ data }: { data: QuotePdfData }) {
 
   return (
     <Document>
-      <Page size="A4" style={styles.page}>
-        <Header />
+      <Page size="A4" style={pdfSharedStyles.page}>
+        <IssuerHeader />
 
         <View style={styles.metaRight}>
           <Text style={styles.metaDate}>{data.city} A {longDateEs(data.date)}</Text>
@@ -165,7 +135,7 @@ export default function QuotePdf({ data }: { data: QuotePdfData }) {
 
       {data.images && data.images.length > 0 && (
         <Page size="A4" style={styles.imagesPage}>
-          <Header />
+          <IssuerHeader />
           <View style={styles.imagesGrid}>
             {data.images.map((src, i) => (
               <View style={styles.imageWrap} key={i} wrap={false}>

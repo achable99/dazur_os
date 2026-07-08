@@ -1,5 +1,4 @@
 import { useMemo, useState } from "react";
-import { pdf } from "@react-pdf/renderer";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -13,9 +12,13 @@ import { Trash2, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 import { fmtMXN, toLocalDateString, computeTotals } from "@/lib/finance";
 import { QUOTE_DEFAULTS } from "@/lib/issuer";
+import { downloadPdfDocument } from "@/lib/pdfDownload";
 import QuotePdf, { type QuotePdfData } from "./QuotePdf";
 
-type ClientRow = { id: string; razon_social: string; nombre_comercial: string | null; rfc: string };
+type ClientRow = {
+  id: string; razon_social: string; nombre_comercial: string | null; rfc: string;
+  tipo_persona: "fisica" | "moral" | null;
+};
 
 export type QuoteForEdit = {
   id: string;
@@ -85,9 +88,11 @@ export default function QuoteForm({ editing, onSaved, onCancel }: Props) {
   const { data: clients } = useQuery({
     queryKey: ["clients"],
     queryFn: async () => {
+      // NOTA: incluye tipo_persona para compartir el select con el resto de
+      // consumidores de la key ["clients"] (ver IncomeInvoiceDialog).
       const { data, error } = await supabase
         .from("clients")
-        .select("id, razon_social, nombre_comercial, rfc")
+        .select("id, razon_social, nombre_comercial, rfc, tipo_persona")
         .order("razon_social");
       if (error) throw error;
       return data as ClientRow[];
@@ -165,15 +170,7 @@ export default function QuoteForm({ editing, onSaved, onCancel }: Props) {
   };
 
   const downloadPdf = async (numberForPdf: number) => {
-    const blob = await pdf(<QuotePdf data={buildPdfData(numberForPdf)} />).toBlob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `Cotizacion-${numberForPdf}.pdf`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
+    await downloadPdfDocument(<QuotePdf data={buildPdfData(numberForPdf)} />, `Cotizacion-${numberForPdf}.pdf`);
   };
 
   const persist = async (clean: ItemRow[]): Promise<number> => {

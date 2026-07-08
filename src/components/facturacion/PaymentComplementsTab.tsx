@@ -50,9 +50,12 @@ export default function PaymentComplementsTab() {
   const { data: clients } = useQuery({
     queryKey: ["clients"],
     queryFn: async () => {
-      const { data, error } = await supabase.from("clients").select("id, razon_social, rfc").order("razon_social");
+      // NOTA: incluye tipo_persona para que el select coincida con el resto de
+      // consumidores de la key ["clients"] (ver IncomeInvoiceDialog) y evitar que
+      // el cache sirva filas sin ese campo a un consumidor que sí lo necesita.
+      const { data, error } = await supabase.from("clients").select("id, razon_social, rfc, tipo_persona").order("razon_social");
       if (error) throw error;
-      return data as { id: string; razon_social: string; rfc: string }[];
+      return data as { id: string; razon_social: string; rfc: string; tipo_persona: "fisica" | "moral" | null }[];
     },
   });
 
@@ -75,7 +78,7 @@ export default function PaymentComplementsTab() {
   });
 
   const clientMap = useMemo(() => {
-    const m = new Map<string, { razon_social: string; rfc: string }>();
+    const m = new Map<string, { razon_social: string; rfc: string; tipo_persona: "fisica" | "moral" | null }>();
     clients?.forEach((c) => m.set(c.id, c));
     return m;
   }, [clients]);

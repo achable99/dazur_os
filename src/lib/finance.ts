@@ -32,6 +32,76 @@ export const INVOICE_TYPES = ["Ingreso", "Honorarios", "Arrendamiento", "Otro"];
 
 export const IVA_RATE = 0.16;
 export const ISR_RATE = 0.0125;
+export const ISR_PROVISION_RATE = 0.025;
+
+export const ISR_RESICO_MONTHLY_BRACKETS = [
+  { upTo: 25000, rate: 0.01 },
+  { upTo: 50000, rate: 0.011 },
+  { upTo: 83333.33, rate: 0.015 },
+  { upTo: 208333.33, rate: 0.02 },
+  { upTo: 3500000, rate: 0.025 },
+] as const;
+
+export const ISR_RESICO_ANNUAL_BRACKETS = [
+  { upTo: 300000, rate: 0.01 },
+  { upTo: 600000, rate: 0.011 },
+  { upTo: 1000000, rate: 0.015 },
+  { upTo: 2500000, rate: 0.02 },
+  { upTo: 3500000, rate: 0.025 },
+] as const;
+
+/**
+ * ISR RESICO (persona física): tasa plana por rango de ingreso cobrado
+ * (no marginal). Se calcula sobre la base acumulada del período elegido.
+ * Si la base rebasa el tope de $3,500,000 (límite de permanencia en RESICO),
+ * se aplica la tasa máxima (2.5%) y se marca `exceeded: true`.
+ */
+export function resicoIsr(base: number, period: "monthly" | "annual") {
+  const brackets = period === "annual" ? ISR_RESICO_ANNUAL_BRACKETS : ISR_RESICO_MONTHLY_BRACKETS;
+  const b = Number.isFinite(base) && base > 0 ? base : 0;
+  const bracket = brackets.find((br) => b <= br.upTo);
+  const rate = bracket ? bracket.rate : brackets[brackets.length - 1].rate;
+  const exceeded = !bracket;
+  const isr = Number((b * rate).toFixed(2));
+  return { rate, isr, exceeded };
+}
+
+/**
+ * Provisión propia de ISR RESICO: siempre se aparta el 2.5% del subtotal
+ * cobrado (tasa máxima de la tabla, para que la provisión siempre alcance).
+ * De ese total, lo ya retenido por clientes persona moral (1.25%) se
+ * descuenta; el resto ("propia") es lo que el propio negocio debe apartar.
+ */
+export function resicoProvision(base: number, retenido: number) {
+  const b = Number.isFinite(base) && base > 0 ? base : 0;
+  const r = Number.isFinite(retenido) && retenido > 0 ? retenido : 0;
+  const total = Number((ISR_PROVISION_RATE * b).toFixed(2));
+  const propia = Number(Math.max(0, total - r).toFixed(2));
+  return { total, propia };
+}
+
+/** Formats a rate (e.g. 0.0125) as a percentage label with 2 decimals: "1.25%". */
+export function pctLabel(rate: number): string {
+  return `${(rate * 100).toFixed(2)}%`;
+}
+
+/**
+ * Resumen de ISR RESICO para un conjunto de facturas cobradas (base = Σsubtotal,
+ * retenido = Σisr), reutilizado tanto por el resumen fiscal principal como por
+ * el brief anual mostrado/exportado en el PDF de declaración. `isrACargo` se
+ * deriva por separado en el llamador (isrCausado − retenido, sin negativos).
+ */
+export function computeIsrBrief(
+  invoices: { subtotal: number; isr: number }[],
+  period: "monthly" | "annual",
+) {
+  const base = invoices.reduce((s, i) => s + Number(i.subtotal), 0);
+  const retenido = invoices.reduce((s, i) => s + Number(i.isr), 0);
+  const { rate, isr, exceeded } = resicoIsr(base, period);
+  const { total, propia } = resicoProvision(base, retenido);
+  const sobrante = Math.max(0, Number((total - isr).toFixed(2)));
+  return { base, rate, isr, exceeded, retenido, total, propia, sobrante };
+}
 
 export const periodKey = (y: number, m: number) => y * 100 + m;
 
