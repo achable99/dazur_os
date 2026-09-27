@@ -26,7 +26,7 @@ export function useCashflowDashboard(year: number, selectedMonth = 12) {
         queryKey: ["all_income_invoices_fiscal", "cashflow_dashboard"],
         queryFn: () => fetchAll<IncomeInvoice>(async (from, to) => {
           const { data, error } = await supabase.from("income_invoices")
-            .select("year,month,total,paid_amount,subtotal,iva,isr,is_collected,collected_date")
+            .select("year,month,date,total,paid_amount,subtotal,iva,isr,is_collected,collected_date")
             .order("id").range(from, to);
           return { data, error };
         }),

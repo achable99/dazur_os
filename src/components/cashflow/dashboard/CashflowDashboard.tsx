@@ -8,9 +8,9 @@ import type { CashflowDashboardProps, DashboardIsr, DashboardIva, DashboardKpis 
 
 export type { CashflowDashboardData, CashflowDashboardProps, DashboardExpenseMonth, DashboardIva, DashboardIsr, DashboardKpis, DashboardMonth } from "./types";
 
-function Metric({ label, value, description, className }: { label: string; value: number; description: string; className?: string }) {
+function Metric({ label, value, description }: { label: string; value: number; description: string }) {
   return (
-    <Card className={className}>
+    <Card>
       <CardHeader className="pb-2">
         <CardTitle className="text-sm font-medium text-muted-foreground">{label}</CardTitle>
       </CardHeader>
@@ -22,14 +22,13 @@ function Metric({ label, value, description, className }: { label: string; value
   );
 }
 
-export function DashboardKpiCards({ kpis }: { kpis: DashboardKpis }) {
+export function DashboardKpiCards({ kpis, view }: { kpis: DashboardKpis; view: "month" | "year" }) {
   return (
     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-      <Metric label="Cobrado fiscalmente" value={kpis.collectedFiscal} description="Cobros del período seleccionado." />
-      <Metric label="Saldo pendiente hoy" value={kpis.pendingToday} description="Cartera actual de facturas emitidas en el año seleccionado; no es histórica." />
-      <Metric label="Gastos registrados" value={kpis.registeredExpenses} description="Gastos capturados en el período." />
-      <Metric label="Impuestos" value={kpis.taxes} description="Total de impuestos del período según el resumen fiscal." />
-      <Metric label="Remanente estimado" value={kpis.remanenteEstimado} description="Estimación del período seleccionado; no es saldo bancario ni saldo fiscal definitivo." className="bg-muted/30 sm:col-span-2 xl:col-span-4" />
+      <Metric label="Cobrado fiscalmente" value={kpis.collectedFiscal} description={`Cobros ${view === "month" ? "del mes" : "del año"} seleccionado.`} />
+      <Metric label="Saldo pendiente hoy" value={kpis.pendingToday} description="Saldo actual de todas las facturas emitidas hasta hoy y sin cobrar, de cualquier año." />
+      <Metric label="Gastos registrados" value={kpis.registeredExpenses} description={`Gastos capturados en ${view === "month" ? "el mes" : "el año"}.`} />
+      <Metric label="Impuestos" value={kpis.taxes} description={`Total de impuestos ${view === "month" ? "del mes" : "del año"} según el resumen fiscal.`} />
     </div>
   );
 }
@@ -43,22 +42,22 @@ function AmountRow({ label, value }: { label: string; value: number }) {
   );
 }
 
-export function IvaPanel({ iva }: { iva: DashboardIva }) {
+export function IvaPanel({ iva, annual = false }: { iva: DashboardIva; annual?: boolean }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">IVA del período</CardTitle>
-        <CardDescription>Desglose fiscal de traslado, acreditamiento y saldo previo.</CardDescription>
+        <CardTitle className="text-base">{annual ? "IVA anual acumulado" : "IVA del período"}</CardTitle>
+        <CardDescription>{annual ? "Suma del IVA a pagar de cada mes del año." : "Desglose fiscal de traslado, acreditamiento y saldo previo."}</CardDescription>
       </CardHeader>
       <CardContent>
-        <dl>
+        {!annual && <dl>
           <AmountRow label="IVA trasladado" value={iva.transferred} />
           <AmountRow label="IVA acreditable" value={iva.creditable} />
           <AmountRow label="Ajustes al acreditable" value={iva.adjustments} />
           <AmountRow label="IVA a favor previo (arrastre)" value={iva.carryForward} />
-        </dl>
-        <div className="mt-4 rounded-md bg-muted p-4">
-          <p className="text-sm font-medium">{iva.result >= 0 ? "IVA a pagar" : "IVA a favor"}</p>
+        </dl>}
+        <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950/40">
+          <p className="text-sm font-medium">{annual ? "IVA a pagar acumulado" : iva.result >= 0 ? "IVA a pagar" : "IVA a favor"}</p>
           <p className="mt-1 text-xl font-semibold tabular-nums">{fmtMXN(Math.abs(iva.result))}</p>
         </div>
       </CardContent>
@@ -93,7 +92,7 @@ function IsrCard({ title, isr }: { title: string; isr: DashboardIsr }) {
           <AmountRow label="ISR retenido" value={isr.withheld} />
           <AmountRow label="Provisión total" value={isr.provision} />
         </dl>
-        <div className="mt-4 rounded-md bg-muted p-4">
+        <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950/40">
           <p className="text-sm font-medium">Sobrante estimado de provisión</p>
           <p className="mt-1 text-xl font-semibold tabular-nums">{fmtMXN(isr.estimatedSurplus)}</p>
         </div>
@@ -102,11 +101,10 @@ function IsrCard({ title, isr }: { title: string; isr: DashboardIsr }) {
   );
 }
 
-export function IsrCards({ period, annual }: { period: DashboardIsr; annual: DashboardIsr }) {
+export function IsrCards({ period, annual }: { period?: DashboardIsr; annual: DashboardIsr }) {
   return (
-    <div className="grid gap-4 lg:grid-cols-2">
-      <IsrCard title="ISR del período" isr={period} />
-      <IsrCard title="ISR anual acumulado" isr={annual} />
+    <div>
+      {period ? <IsrCard title="ISR del período" isr={period} /> : <IsrCard title="ISR anual acumulado" isr={annual} />}
     </div>
   );
 }
@@ -129,7 +127,7 @@ export function DashboardLimitations() {
 }
 
 export function DashboardLoading() {
-  return <div className="space-y-4" role="status" aria-label="Cargando tablero de flujo de efectivo"><div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{[0, 1, 2, 3, 4].map((item) => <Skeleton key={item} className="h-32" />)}</div><div className="grid gap-4 lg:grid-cols-2"><Skeleton className="h-72" /><Skeleton className="h-72" /></div><span className="sr-only">Cargando tablero de flujo de efectivo</span></div>;
+  return <div className="space-y-4" role="status" aria-label="Cargando tablero de flujo de efectivo"><div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{[0, 1, 2, 3].map((item) => <Skeleton key={item} className="h-32" />)}</div><div className="grid gap-4 lg:grid-cols-2"><Skeleton className="h-72" /><Skeleton className="h-72" /></div><span className="sr-only">Cargando tablero de flujo de efectivo</span></div>;
 }
 
 export function DashboardEmpty() {
@@ -146,17 +144,27 @@ export default function CashflowDashboard(props: CashflowDashboardProps) {
   if (props.status === "empty") return <DashboardEmpty />;
 
   const { data } = props;
+  const isAnnual = props.view === "year";
+  const monthIndex = data.selectedMonth - 1;
+  const selected = <T,>(items: T[]) => isAnnual ? items : items.slice(monthIndex, monthIndex + 1);
+  const kpis: DashboardKpis = isAnnual ? {
+    collectedFiscal: data.annual.ingresosCobrados,
+    pendingToday: data.kpis.pendingToday,
+    registeredExpenses: data.annual.gastosRegistrados,
+    taxes: data.annual.taxes,
+  } : data.kpis;
+  const iva: DashboardIva = isAnnual ? { ...data.iva, result: data.annual.ivaAPagar } : data.iva;
   return (
     <section className="space-y-4" aria-label="Tablero de flujo de efectivo">
-      <DashboardKpiCards kpis={data.kpis} />
+      <DashboardKpiCards kpis={kpis} view={props.view} />
       <div className="grid gap-4 lg:grid-cols-2">
-        <CollectionsChart months={data.collectionsByMonth} />
-        <OutstandingChart months={data.outstandingByIssueMonth} />
+        <CollectionsChart months={selected(data.collectionsByMonth)} />
+        <OutstandingChart months={selected(data.outstandingByIssueMonth)} description={isAnnual ? "Saldo pendiente hoy de facturas emitidas en el año seleccionado, agrupado por mes de emisión; no es histórico." : "Saldo pendiente hoy de facturas emitidas en el mes seleccionado; no es histórico."} />
       </div>
-      <ExpensesChart months={data.expensesByMonth} />
+      <ExpensesChart months={selected(data.expensesByMonth)} />
       <div className="grid gap-4 xl:grid-cols-2">
-        <IvaPanel iva={data.iva} />
-        <IsrCards period={data.periodIsr} annual={data.annualIsr} />
+        <IvaPanel iva={iva} annual={isAnnual} />
+        <IsrCards period={isAnnual ? undefined : data.periodIsr} annual={data.annualIsr} />
       </div>
       <DashboardLimitations />
     </section>

@@ -3,7 +3,7 @@ import { buildCashflowDashboard, type CashflowDashboardInput, type IncomeInvoice
 
 const empty = (): CashflowDashboardInput => ({ incomes: [], expenses: [], carryovers: [], adjustments: [] });
 const income = (changes: Partial<IncomeInvoice> = {}): IncomeInvoice => ({
-  year: 2026, month: 1, total: 1147.5, paid_amount: 0,
+  year: 2026, month: 1, date: "2026-01-01", total: 1147.5, paid_amount: 0,
   subtotal: 1000, iva: 160, isr: 12.5,
   is_collected: false, collected_date: null, ...changes,
 });
@@ -16,15 +16,30 @@ describe("buildCashflowDashboard", () => {
     expect(result.kpis.pendienteActual).toBe(747.5);
     expect(result.month.ingresosCobrados).toBe(0);
     expect(result.metadata.pendiente.status).toBe("current");
-    expect(result.metadata.pendiente.warning).toContain("no es historial mensual");
+    expect(result.metadata.pendiente.warning).toContain("todas las facturas");
     expect(result.outstandingByIssueMonth[0].amount).toBe(747.5);
     expect(result.kpis.pendingToday).toBe(747.5);
+  });
+
+  it("suma pendientes de todos los años hasta la fecha local y excluye cobradas, futuras y sobrepagadas", () => {
+    const data = empty();
+    data.incomes = [
+      income({ year: 2025, month: 12, date: "2025-12-31", paid_amount: 200 }),
+      income({ month: 9, date: "2026-09-27", paid_amount: 100 }),
+      income({ month: 9, date: "2026-09-28" }),
+      income({ month: 9, date: "2026-09-26", is_collected: true }),
+      income({ month: 9, date: "2026-09-26", paid_amount: 2000 }),
+    ];
+    const result = buildCashflowDashboard(data, 2026, 9, new Date(2026, 8, 27, 23, 30));
+    expect(result.kpis.pendingToday).toBe(1995);
+    expect(result.outstandingByIssueMonth[8].amount).toBe(1047.5);
+    expect(result.outstandingByIssueMonth).toHaveLength(12);
   });
 
   it("reconoce en enero una factura emitida en diciembre al cobrarse en enero", () => {
     const data = empty();
     data.incomes = [income({
-      year: 2025, month: 12, paid_amount: 1147.5,
+      year: 2025, month: 12, date: "2025-12-01", paid_amount: 1147.5,
       is_collected: true, collected_date: "2026-01-04",
     })];
     const result = buildCashflowDashboard(data, 2026, 1);
@@ -45,7 +60,6 @@ describe("buildCashflowDashboard", () => {
     expect(result.gastosDeducibles).toBe(116);
     expect(result.gastosNoDeducibles).toBe(232);
     expect(result.ivaAcreditableBase).toBe(16);
-    expect(result.remanenteEstimado).toBe(-348);
   });
 
   it("aplica ajuste y arrastre de IVA a favor, incluso de diciembre a enero", () => {
@@ -60,23 +74,37 @@ describe("buildCashflowDashboard", () => {
     expect(result.ivaAPagar).toBe(90);
   });
 
-  it("estima remanente después de gastos, IVA e ISR y calcula ISR anual con tabla anual", () => {
+  it("suma el año completo y calcula ISR anual con su tabla anual", () => {
     const data = empty();
     data.incomes = [income({ paid_amount: 1147.5, is_collected: true, collected_date: "2026-01-15" })];
     data.expenses = [{ year: 2026, month: 1, total: 116, iva: 16, no_deducible: false }];
     const result = buildCashflowDashboard(data, 2026, 1);
     expect(result.month.ivaAPagar).toBe(144);
     expect(result.month.isrACargo).toBe(0);
-    expect(result.month.remanenteEstimado).toBe(887.5);
     expect(result.annual.isrCausado).toBe(10);
-    expect(result.annual.remanenteEstimado).toBe(887.5);
-    expect(result.metadata.remanente.status).toBe("estimated");
+    expect(result.annual.ivaAPagar).toBe(144);
+    expect(result.annual.taxes).toBe(144);
     expect(result.months).toHaveLength(12);
     expect(result.collectionsByMonth).toHaveLength(12);
     expect(result.expensesByMonth[0].deductible).toBe(116);
     expect(result.iva.result).toBe(144);
     expect(result.periodIsr.caused).toBe(10);
     expect(result.kpis.taxes).toBe(144);
+  });
+
+  it("mantiene el total anual completo aunque cambie el mes seleccionado", () => {
+    const data = empty();
+    data.incomes = [
+      income({ paid_amount: 1147.5, is_collected: true, collected_date: "2026-01-15" }),
+      income({ month: 12, date: "2026-12-01", paid_amount: 1147.5, is_collected: true, collected_date: "2026-12-15" }),
+    ];
+    const january = buildCashflowDashboard(data, 2026, 1);
+    const december = buildCashflowDashboard(data, 2026, 12);
+    expect(january.month.ingresosCobrados).toBe(1147.5);
+    expect(january.annual).toEqual(december.annual);
+    expect(january.annual.ingresosCobrados).toBe(2295);
+    expect(january.annual.ivaAPagar).toBe(320);
+    expect(january.annual.taxes).toBe(320);
   });
 
   it("usa rangos diferentes para ISR mensual y anual acumulado", () => {

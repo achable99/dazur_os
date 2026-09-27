@@ -16,7 +16,18 @@ export type DashboardKpis = {
   pendingToday: number;
   registeredExpenses: number;
   taxes: number;
-  remanenteEstimado: number;
+};
+
+export type DashboardPeriod = {
+  ingresosCobrados: number;
+  gastosRegistrados: number;
+  ivaTrasladado: number;
+  ivaAcreditableBase: number;
+  ivaAcreditableAjuste: number;
+  carryIvaFavor: number;
+  ivaResultado: number;
+  ivaAPagar: number;
+  isrACargo: number;
 };
 
 export type DashboardIva = {
@@ -39,6 +50,11 @@ export type DashboardIsr = {
 };
 
 export type CashflowDashboardData = {
+  year: number;
+  selectedMonth: number;
+  months: DashboardPeriod[];
+  month: DashboardPeriod;
+  annual: Pick<DashboardPeriod, "ingresosCobrados" | "gastosRegistrados" | "ivaAPagar" | "isrACargo"> & { taxes: number };
   /** Cobros reconocidos fiscalmente, agrupados por mes de cobro. */
   collectionsByMonth: DashboardMonth[];
   /** Cartera pendiente a la fecha actual, agrupada por mes de emisión. */
@@ -50,8 +66,10 @@ export type CashflowDashboardData = {
   annualIsr: DashboardIsr;
 };
 
+export type DashboardView = "month" | "year";
+
 export type CashflowDashboardProps =
   | { status: "loading"; data?: never; error?: never }
   | { status: "error"; error?: string; data?: never }
   | { status: "empty"; data?: never; error?: never }
-  | { status: "ready"; data: CashflowDashboardData; error?: never };
+  | { status: "ready"; data: CashflowDashboardData; view: DashboardView; error?: never };

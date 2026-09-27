@@ -1,7 +1,7 @@
 import { computeIsrBrief, MONTHS_ES } from "@/lib/finance";
 
 export type IncomeInvoice = {
-  year: number; month: number; total: number; paid_amount: number;
+  year: number; month: number; date: string; total: number; paid_amount: number;
   subtotal: number; iva: number; isr: number;
   is_collected: boolean; collected_date: string | null;
 };
@@ -28,6 +28,9 @@ export type CashflowDashboardInput = {
 
 const money = (value: number) => Number(value.toFixed(2));
 
+const localIsoDate = (date: Date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+
 function collectedPeriod(date: string | null): { year: number; month: number } | null {
   if (!date) return null;
   const match = /^(\d{4})-(\d{2})-\d{2}$/.exec(date);
@@ -46,7 +49,7 @@ function collectedIn(incomes: IncomeInvoice[], year: number, month: number) {
   });
 }
 
-export function buildCashflowDashboard(input: CashflowDashboardInput, year: number, selectedMonth = 12) {
+export function buildCashflowDashboard(input: CashflowDashboardInput, year: number, selectedMonth = 12, today = new Date()) {
   if (!Number.isInteger(year) || !Number.isInteger(selectedMonth) || selectedMonth < 1 || selectedMonth > 12) {
     throw new RangeError("El año y el mes seleccionado deben ser válidos");
   }
@@ -82,17 +85,18 @@ export function buildCashflowDashboard(input: CashflowDashboardInput, year: numb
       isrBase: money(isr.base), isrRate: isr.rate, isrCausado: isr.isr,
       isrRetenido: money(isr.retenido), isrACargo, isrExceeded: isr.exceeded,
       provisionTotal: isr.total, provisionPropia: isr.propia, provisionSobrante: isr.sobrante,
-      remanenteEstimado: money(ingresosCobrados - gastosRegistrados - ivaAPagar - isrACargo),
     };
   });
 
   // paid_amount es una foto actual; no hay fechas de cada pago para reconstruir meses pasados.
-  const pendienteActual = money(incomes.filter((invoice) => invoice.year === year).reduce(
+  const todayISO = localIsoDate(today);
+  const pendingInvoices = incomes.filter((invoice) => !invoice.is_collected && invoice.date <= todayISO);
+  const pendienteActual = money(pendingInvoices.reduce(
     (sum, invoice) => sum + Math.max(0, Number(invoice.total) - Number(invoice.paid_amount)), 0,
   ));
   const outstandingByIssueMonth = months.map((row) => ({
     label: `${row.label.slice(0, 3)} ${year}`,
-    amount: money(incomes.filter((invoice) => invoice.year === year && invoice.month === row.month).reduce(
+    amount: money(pendingInvoices.filter((invoice) => invoice.year === year && invoice.month === row.month).reduce(
       (sum, invoice) => sum + Math.max(0, Number(invoice.total) - Number(invoice.paid_amount)), 0,
     )),
   }));
@@ -103,24 +107,21 @@ export function buildCashflowDashboard(input: CashflowDashboardInput, year: numb
     nonDeductible: row.gastosNoDeducibles,
   }));
   const month = months[selectedMonth - 1];
-  const throughMonth = months.slice(0, selectedMonth);
   const sum = (field: "ingresosCobrados" | "gastosRegistrados" | "gastosDeducibles" | "gastosNoDeducibles" | "ivaAPagar") =>
-    money(throughMonth.reduce((total, row) => total + row[field], 0));
+    money(months.reduce((total, row) => total + row[field], 0));
 
-  // El brief anual usa la tabla ANUAL de RESICO sobre cobros del ejercicio hasta el mes elegido.
+  // El brief anual usa la tabla ANUAL de RESICO sobre todos los cobros del ejercicio.
   const annualCollected = incomes.filter((invoice) => {
     if (!invoice.is_collected) return false;
     const period = collectedPeriod(invoice.collected_date);
-    return period?.year === year && period.month <= selectedMonth;
+    return period?.year === year;
   });
   const annualIsr = computeIsrBrief(annualCollected, "annual");
   const annualIsrACargo = Math.max(0, money(annualIsr.isr - annualIsr.retenido));
-  const annualIngresosCobrados = sum("ingresosCobrados");
-  const annualGastosRegistrados = sum("gastosRegistrados");
   const annualIvaAPagar = sum("ivaAPagar");
   const annual = {
-    ingresosCobrados: annualIngresosCobrados,
-    gastosRegistrados: annualGastosRegistrados,
+    ingresosCobrados: sum("ingresosCobrados"),
+    gastosRegistrados: sum("gastosRegistrados"),
     gastosDeducibles: sum("gastosDeducibles"),
     gastosNoDeducibles: sum("gastosNoDeducibles"),
     ivaAPagar: annualIvaAPagar,
@@ -129,7 +130,7 @@ export function buildCashflowDashboard(input: CashflowDashboardInput, year: numb
     isrACargo: annualIsrACargo, isrExceeded: annualIsr.exceeded,
     provisionTotal: annualIsr.total, provisionPropia: annualIsr.propia,
     provisionSobrante: annualIsr.sobrante,
-    remanenteEstimado: money(annualIngresosCobrados - annualGastosRegistrados - annualIvaAPagar - annualIsrACargo),
+    taxes: money(annualIvaAPagar + annualIsrACargo),
   };
 
   return {
@@ -162,22 +163,19 @@ export function buildCashflowDashboard(input: CashflowDashboardInput, year: numb
       pendienteActual,
       ivaAPagar: month.ivaAPagar,
       isrACargo: month.isrACargo,
-      remanenteEstimado: month.remanenteEstimado,
     },
     metadata: {
       pendiente: {
         value: pendienteActual,
         status: "current" as const,
-        basis: "invoice_issue_year" as const,
-        warning: "Saldo pendiente actual de facturas emitidas en el año seleccionado (total − pagado); no es historial mensual.",
+        basis: "invoices_issued_through_today" as const,
+        warning: "Saldo pendiente actual de todas las facturas emitidas hasta hoy y sin cobrar (total − pagado); no es historial mensual.",
       },
       warnings: [
         "Los cobros fiscales se reconocen al marcar la factura como cobrada y por collected_date; los pagos parciales no tienen historial fiscal mensual.",
         "Los gastos se agrupan por el mes registrado en la factura; no hay fecha de pago del gasto.",
-        "El remanente es una estimación: cobros registrados menos gastos registrados, IVA a pagar e ISR a cargo; no representa saldo bancario.",
         "El IVA mensual usa sólo arrastres a favor guardados; los arrastres pueden quedar desactualizados si cambian facturas o ajustes.",
       ],
-      remanente: { status: "estimated" as const },
     },
   };
 }
