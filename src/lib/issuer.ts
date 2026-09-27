@@ -4,7 +4,7 @@ import logo from "@/assets/logo.png";
 export const ISSUER = {
   logo,
   name: "DAZUR",
-  tagline1: "INNOVACIÓN Y OBRA",
+  tagline1: "DUCTERÍA • EXTRACTORES • INYECTORES • HERRERÍA EN GENERAL",
   tagline2: "SERVICIOS DE MANTENIMIENTO EN GENERAL",
   address: "CALLE 53 #351E POR 22 Y 24 COL. CENTRO MÉRIDA, YUCATÁN, MÉXICO",
   contact: "Admon.dazur@outlook.com – Cel. 999-601-2915",
