@@ -6,13 +6,15 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Info, Plus, Pencil, Trash2, Eye } from "lucide-react";
+import { ChevronDown, Plus, Pencil, Trash2, Eye } from "lucide-react";
 import { toast } from "sonner";
-import { fmtMXN, monthLabel, periodKey, EXPENSE_CATEGORIES } from "@/lib/finance";
+import { fmtMXN, periodKey, EXPENSE_CATEGORIES } from "@/lib/finance";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import EntryDialog from "@/components/cashflow/EntryDialog";
 import CreditLinesPanel from "@/components/cashflow/CreditLinesPanel";
+import CashflowDashboard from "@/components/cashflow/dashboard/CashflowDashboard";
+import { useCashflowDashboard } from "@/hooks/useCashflowDashboard";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -34,6 +36,12 @@ export default function FlujoEfectivo() {
   const [deleting, setDeleting] = useState<CFEntry | null>(null);
   const [expenseFilter, setExpenseFilter] = useState<OriginFilter>("all");
   const [incomeFilter, setIncomeFilter] = useState<OriginFilter>("all");
+  const [operationsOpen, setOperationsOpen] = useState(false);
+  const dashboard = useCashflowDashboard(year, month);
+
+  const invalidateDashboard = () => qc.invalidateQueries({
+    predicate: ({ queryKey }) => queryKey.includes("cashflow_dashboard"),
+  });
 
   const { data: entries, isLoading } = useQuery({
     queryKey: ["cash_flow_entries"],
@@ -44,53 +52,6 @@ export default function FlujoEfectivo() {
       return data as CFEntry[];
     },
   });
-
-  const { data: openings } = useQuery({
-    queryKey: ["opening_balances"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("opening_balances").select("*").order("year").order("month");
-      if (error) throw error;
-      return data as { id: string; month: number; year: number; amount: number }[];
-    },
-  });
-
-  const totals = useMemo(() => {
-    if (!entries) return { saldoInicial: 0, ingresos: 0, gastos: 0, balance: 0 };
-    const k = periodKey(year, month);
-
-    // Use the most recent manual opening balance with periodKey <= k as the starting point.
-    // This way, a manual override (e.g. "set saldo inicial" for a given month) properly
-    // resets the running balance from that month forward.
-    const baseOpening = (openings ?? [])
-      .filter((o) => periodKey(o.year, o.month) <= k)
-      .sort((a, b) => periodKey(b.year, b.month) - periodKey(a.year, a.month))[0];
-    const baseK = baseOpening ? periodKey(baseOpening.year, baseOpening.month) : null;
-    const running = baseOpening ? Number(baseOpening.amount) : 0;
-
-    let priorIn = 0, priorOut = 0;
-    let curIn = 0, curOut = 0;
-    for (const e of entries) {
-      const d = new Date(e.date + "T00:00:00");
-      const ek = periodKey(d.getFullYear(), d.getMonth() + 1);
-      // Only entries from the base month onward count toward the running balance.
-      if (baseK !== null && ek < baseK) continue;
-      if (ek < k) {
-        if (e.type === "income") priorIn += Number(e.amount);
-        else priorOut += Number(e.amount);
-      } else if (ek === k) {
-        if (e.type === "income") curIn += Number(e.amount);
-        else curOut += Number(e.amount);
-      }
-    }
-    const saldoInicial = running + priorIn - priorOut;
-    return {
-      saldoInicial,
-      ingresos: curIn,
-      gastos: curOut,
-      balance: saldoInicial + curIn - curOut,
-    };
-  }, [entries, openings, year, month]);
 
   const monthEntries = useMemo(() => {
     if (!entries) return { ingresos: [] as CFEntry[], gastos: [] as CFEntry[] };
@@ -113,6 +74,7 @@ export default function FlujoEfectivo() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["cash_flow_entries"] });
+      invalidateDashboard();
       toast.success("Entrada eliminada");
       setDeleting(null);
     },
@@ -123,77 +85,70 @@ export default function FlujoEfectivo() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Flujo de Efectivo</h1>
-          <p className="text-sm text-muted-foreground">Saldos arrastrados mes a mes.</p>
+          <h1 className="text-2xl font-semibold tracking-tight">Flujo de efectivo</h1>
+          <p className="text-sm text-muted-foreground">Cobros, cartera pendiente e impuestos del período.</p>
         </div>
         <MonthSelector year={year} month={month} onChange={(y, m) => { setYear(y); setMonth(m); }} />
       </div>
 
-      {/* KPI cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-        <KpiCard
-          label="Saldo Inicial"
-          value={totals.saldoInicial}
-          loading={isLoading}
-          tooltip="Saldo acumulado de meses anteriores"
-        />
-        <KpiCard label="Ingresos" value={totals.ingresos} loading={isLoading} valueClassName="text-success" />
-        <KpiCard label="Gastos" value={totals.gastos} loading={isLoading} valueClassName="text-destructive" />
-        <KpiCard
-          label="Balance Final"
-          value={totals.balance}
-          loading={isLoading}
-          valueClassName={totals.balance >= 0 ? "text-success" : "text-destructive"}
-        />
-      </div>
+      {dashboard.isError ? (
+        <CashflowDashboard status="error" error={dashboard.error instanceof Error ? dashboard.error.message : undefined} />
+      ) : dashboard.isLoading ? (
+        <CashflowDashboard status="loading" />
+      ) : dashboard.data && (
+        dashboard.data.collectionsByMonth.some(({ amount }) => amount !== 0) ||
+        dashboard.data.outstandingByIssueMonth.some(({ amount }) => amount !== 0) ||
+        dashboard.data.expensesByMonth.some(({ deductible, nonDeductible }) => deductible !== 0 || nonDeductible !== 0) ||
+        dashboard.data.iva.adjustments !== 0 || dashboard.data.iva.carryForward !== 0
+      ) ? (
+        <CashflowDashboard status="ready" data={dashboard.data} />
+      ) : (
+        <CashflowDashboard status="empty" />
+      )}
 
-      {/* Income / Expense panels */}
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <EntryPanel
-          title="Ingresos"
-          buttonLabel="Agregar ingreso"
-          entries={monthEntries.ingresos}
-          loading={isLoading}
-          type="income"
-          filter={incomeFilter}
-          onFilterChange={setIncomeFilter}
-          onAdd={() => setEditing({ type: "income" })}
-          onEdit={(e) => setEditing({ type: "income", entry: e })}
-          onDelete={(e) => setDeleting(e)}
-        />
-        <EntryPanel
-          title="Gastos"
-          buttonLabel="Agregar gasto"
-          entries={monthEntries.gastos}
-          loading={isLoading}
-          type="expense"
-          filter={expenseFilter}
-          onFilterChange={setExpenseFilter}
-          onAdd={() => setEditing({ type: "expense" })}
-          onEdit={(e) => setEditing({ type: "expense", entry: e })}
-          onDelete={(e) => setDeleting(e)}
-        />
-      </div>
-
-      <CreditLinesPanel />
-
-      {/* Monthly summary */}
-      <Card className="p-6">
-        <h3 className="text-sm font-medium text-muted-foreground">Resumen del Mes — {monthLabel(month, year)}</h3>
-        <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <SummaryItem label="Saldo inicial" value={fmtMXN(totals.saldoInicial)} />
-          <SummaryItem label="+ Ingresos" value={fmtMXN(totals.ingresos)} className="text-success" />
-          <SummaryItem label="− Gastos" value={fmtMXN(totals.gastos)} className="text-destructive" />
-          <SummaryItem
-            label="= Balance final"
-            value={fmtMXN(totals.balance)}
-            className={`text-lg ${totals.balance >= 0 ? "text-success" : "text-destructive"} font-semibold`}
-          />
+      <Collapsible open={operationsOpen} onOpenChange={setOperationsOpen} className="rounded-lg border bg-card">
+        <div className="flex flex-wrap items-center justify-between gap-3 p-4 sm:p-5">
+          <div>
+            <h2 className="font-semibold">Movimientos y créditos</h2>
+            <p className="text-sm text-muted-foreground">Consulta y administra ingresos, gastos y líneas de crédito.</p>
+          </div>
+          <CollapsibleTrigger asChild>
+            <Button variant="outline" aria-controls="cash-operations" className="gap-2">
+              {operationsOpen ? "Ocultar movimientos y créditos" : "Abrir movimientos y créditos"}
+              <ChevronDown className={`h-4 w-4 transition-transform ${operationsOpen ? "rotate-180" : ""}`} aria-hidden="true" />
+            </Button>
+          </CollapsibleTrigger>
         </div>
-        <p className="text-xs text-muted-foreground mt-4">
-          Este balance se traslada automáticamente como saldo inicial del siguiente mes.
-        </p>
-      </Card>
+        <CollapsibleContent id="cash-operations" className="space-y-4 px-4 pb-4 sm:px-5 sm:pb-5">
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+            <EntryPanel
+              title="Ingresos"
+              buttonLabel="Agregar ingreso"
+              entries={monthEntries.ingresos}
+              loading={isLoading}
+              type="income"
+              filter={incomeFilter}
+              onFilterChange={setIncomeFilter}
+              onAdd={() => setEditing({ type: "income" })}
+              onEdit={(e) => setEditing({ type: "income", entry: e })}
+              onDelete={(e) => setDeleting(e)}
+            />
+            <EntryPanel
+              title="Gastos"
+              buttonLabel="Agregar gasto"
+              entries={monthEntries.gastos}
+              loading={isLoading}
+              type="expense"
+              filter={expenseFilter}
+              onFilterChange={setExpenseFilter}
+              onAdd={() => setEditing({ type: "expense" })}
+              onEdit={(e) => setEditing({ type: "expense", entry: e })}
+              onDelete={(e) => setDeleting(e)}
+            />
+          </div>
+          <CreditLinesPanel />
+        </CollapsibleContent>
+      </Collapsible>
 
       {editing && (
         <EntryDialog
@@ -204,6 +159,7 @@ export default function FlujoEfectivo() {
           onClose={() => setEditing(null)}
           onSaved={() => {
             qc.invalidateQueries({ queryKey: ["cash_flow_entries"] });
+            invalidateDashboard();
             setEditing(null);
           }}
         />
@@ -225,42 +181,6 @@ export default function FlujoEfectivo() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
-  );
-}
-
-function KpiCard({ label, value, loading, valueClassName, tooltip }: {
-  label: string; value: number; loading?: boolean; valueClassName?: string; tooltip?: string;
-}) {
-  return (
-    <Card className="p-5">
-      <div className="flex items-center gap-1.5 text-xs uppercase tracking-wide text-muted-foreground">
-        <span>{label}</span>
-        {tooltip && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button type="button"><Info className="h-3.5 w-3.5" /></button>
-            </TooltipTrigger>
-            <TooltipContent>{tooltip}</TooltipContent>
-          </Tooltip>
-        )}
-      </div>
-      {loading ? (
-        <Skeleton className="h-9 w-32 mt-2" />
-      ) : (
-        <div className={`mt-2 text-2xl font-semibold tabular-nums ${valueClassName ?? "text-foreground"}`}>
-          {fmtMXN(value)}
-        </div>
-      )}
-    </Card>
-  );
-}
-
-function SummaryItem({ label, value, className }: { label: string; value: string; className?: string }) {
-  return (
-    <div>
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className={`mt-1 tabular-nums font-medium ${className ?? ""}`}>{value}</div>
     </div>
   );
 }
@@ -305,6 +225,7 @@ function EntryPanel({
               key={opt.value}
               type="button"
               onClick={() => onFilterChange(opt.value)}
+              aria-pressed={filter === opt.value}
               className={`px-2.5 py-1 text-xs rounded-sm transition-colors ${
                 filter === opt.value
                   ? "bg-background text-foreground shadow-sm"
@@ -364,10 +285,10 @@ function EntryPanel({
                   <TableCell className="text-right">
                     {e.origin === "manual" ? (
                       <div className="inline-flex gap-1">
-                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => onEdit(e)}>
+                        <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={`Editar ${e.concept}`} onClick={() => onEdit(e)}>
                           <Pencil className="h-4 w-4" />
                         </Button>
-                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => onDelete(e)}>
+                        <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={`Eliminar ${e.concept}`} onClick={() => onDelete(e)}>
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>
