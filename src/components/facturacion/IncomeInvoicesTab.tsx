@@ -189,7 +189,7 @@ export default function IncomeInvoicesTab() {
                 {filtered.map((i) => {
                   const cl = clientMap.get(i.client_id);
                   return (
-                    <TableRow key={i.id}>
+                    <TableRow key={i.id} className="hover:bg-amber-50 dark:hover:bg-amber-950/40">
                       <TableCell className="max-w-[180px] truncate">{cl?.razon_social ?? "—"}</TableCell>
                       <TableCell>
                         <Tooltip>

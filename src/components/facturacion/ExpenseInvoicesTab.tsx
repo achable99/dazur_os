@@ -157,7 +157,7 @@ export default function ExpenseInvoicesTab() {
               </TableHeader>
               <TableBody>
                 {filtered.map((i) => (
-                  <TableRow key={i.id} className={i.no_deducible ? "opacity-60" : undefined}>
+                  <TableRow key={i.id} className={`hover:bg-amber-50 dark:hover:bg-amber-950/40 ${i.no_deducible ? "opacity-60" : ""}`}>
                     <TableCell className="max-w-[240px]">
                       <div className="flex items-center gap-2">
                         <span className="truncate">{i.concept}</span>
