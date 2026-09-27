@@ -188,8 +188,7 @@ export default function DeclarationPdf({ data }: { data: DeclarationPdfData }) {
 
         <View style={styles.footer}>
           <Text style={styles.footerText}>
-            Documento informativo generado por DazurOS. Es una simulación con fines de planeación; no constituye una
-            declaración oficial ante el SAT.
+            Es una simulación con fines de planeación; no constituye una declaración oficial ante el SAT.
           </Text>
         </View>
       </Page>
