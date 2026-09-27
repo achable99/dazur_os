@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
+import logo from "@/assets/dazur-logo.png";
 
 export default function Login() {
   const { user, signIn } = useAuth();
@@ -39,7 +40,7 @@ export default function Login() {
     <div className="min-h-screen flex items-center justify-center bg-background px-4">
       <Card className="w-full max-w-sm p-8 shadow-sm">
         <div className="text-center mb-6">
-          <h1 className="text-2xl font-bold tracking-tight text-foreground">DazurOS</h1>
+          <h1><img src={logo} alt="DAZUR" className="mx-auto h-auto w-full max-w-[280px]" /></h1>
           <p className="text-sm text-muted-foreground mt-1">Panel de administración</p>
         </div>
         <form onSubmit={onSubmit} className="space-y-4">

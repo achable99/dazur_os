@@ -2,6 +2,8 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { LogOut } from "lucide-react";
+import logo from "@/assets/logo.png";
+import wordmark from "@/assets/dazur-wordmark.png";
 
 const tabs = [
   { to: "/flujo-efectivo", label: "Flujo de Efectivo" },
@@ -23,8 +25,9 @@ export default function AppLayout() {
     <div className="min-h-screen bg-background">
       <header className="sticky top-0 z-30 bg-card border-b border-border">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 h-14 flex items-center gap-6">
-          <NavLink to="/flujo-efectivo" className="font-bold text-foreground tracking-tight text-base">
-            DazurOS
+          <NavLink to="/flujo-efectivo" aria-label="DAZUR, ir a Flujo de Efectivo" className="inline-flex shrink-0 items-center gap-1.5">
+            <img src={logo} alt="" className="h-9 w-auto" />
+            <img src={wordmark} alt="" className="h-5 w-auto" />
           </NavLink>
           <nav className="hidden md:flex items-center gap-1 h-full">
             {tabs.map((t) => (
