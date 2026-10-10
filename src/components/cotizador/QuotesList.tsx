@@ -12,6 +12,8 @@ import { fmtMXN } from "@/lib/finance";
 import { downloadPdfDocument } from "@/lib/pdfDownload";
 import QuotePdf, { type QuotePdfData } from "./QuotePdf";
 import type { QuoteForEdit } from "./QuoteForm";
+import type { QuoteInvoiceSeed } from "@/components/facturacion/IncomeInvoiceDialog";
+import { FilePlus2 } from "lucide-react";
 
 type QuoteListRow = {
   id: string;
@@ -23,9 +25,10 @@ type QuoteListRow = {
 
 interface Props {
   onEdit: (quote: QuoteForEdit) => void;
+  onCreateInvoice: (quote: QuoteInvoiceSeed) => void;
 }
 
-export default function QuotesList({ onEdit }: Props) {
+export default function QuotesList({ onEdit, onCreateInvoice }: Props) {
   const qc = useQueryClient();
 
   const { data: quotes, isLoading } = useQuery({
@@ -37,6 +40,15 @@ export default function QuotesList({ onEdit }: Props) {
         .order("number", { ascending: false });
       if (error) throw error;
       return data as unknown as QuoteListRow[];
+    },
+  });
+
+  const { data: invoicedQuoteIds } = useQuery({
+    queryKey: ["invoiced_quote_ids"],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("income_invoices").select("quote_id").not("quote_id", "is", null);
+      if (error) throw error;
+      return new Set(data.flatMap((row) => row.quote_id ? [row.quote_id] : []));
     },
   });
 
@@ -120,6 +132,27 @@ export default function QuotesList({ onEdit }: Props) {
     onError: (e: Error) => toast.error("Error al abrir la cotización", { description: e.message }),
   });
 
+  const startInvoice = useMutation({
+    mutationFn: async (id: string): Promise<QuoteInvoiceSeed> => {
+      const { q, items } = await fetchFull(id);
+      return {
+        id: q.id,
+        number: q.number,
+        client_id: q.client_id,
+        subtotal: Number(q.subtotal),
+        iva: Number(q.iva),
+        isr: Number(q.isr),
+        total: Number(q.total),
+        apply_iva: q.apply_iva,
+        apply_isr: q.apply_isr,
+        notes: q.notes,
+        concepts: items.map((item) => item.description),
+      };
+    },
+    onSuccess: onCreateInvoice,
+    onError: (e: Error) => toast.error("Error al preparar la factura", { description: e.message }),
+  });
+
   const del = useMutation({
     mutationFn: async (id: string) => {
       const { error } = await supabase.from("quotes").delete().eq("id", id);
@@ -128,6 +161,9 @@ export default function QuotesList({ onEdit }: Props) {
     onSuccess: () => {
       toast.success("Cotización eliminada");
       qc.invalidateQueries({ queryKey: ["quotes"] });
+      qc.invalidateQueries({ queryKey: ["quotes_for_income_invoice"] });
+      qc.invalidateQueries({ queryKey: ["invoiced_quote_ids"] });
+      qc.invalidateQueries({ queryKey: ["income_invoices"] });
     },
     onError: (e: Error) => toast.error("Error al eliminar", { description: e.message }),
   });
@@ -164,6 +200,10 @@ export default function QuotesList({ onEdit }: Props) {
                   <Button variant="ghost" size="icon" className="h-8 w-8" title="Editar"
                     onClick={() => startEdit.mutate(q.id)} disabled={startEdit.isPending}>
                     <Pencil className="h-4 w-4" />
+                  </Button>
+                  <Button variant="ghost" size="icon" className="h-8 w-8" title={invoicedQuoteIds?.has(q.id) ? "Ya tiene factura" : "Crear factura de ingreso"}
+                    onClick={() => startInvoice.mutate(q.id)} disabled={startInvoice.isPending || invoicedQuoteIds?.has(q.id)}>
+                    <FilePlus2 className="h-4 w-4" />
                   </Button>
                   <AlertDialog>
                     <AlertDialogTrigger asChild>

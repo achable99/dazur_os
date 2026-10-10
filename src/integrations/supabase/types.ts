@@ -347,6 +347,8 @@ export type Database = {
           month: number
           notes: string | null
           paid_amount: number
+          payment_type: string
+          quote_id: string | null
           subtotal: number
           total: number
           year: number
@@ -365,6 +367,8 @@ export type Database = {
           month: number
           notes?: string | null
           paid_amount?: number
+          payment_type?: string
+          quote_id?: string | null
           subtotal: number
           total: number
           year: number
@@ -383,6 +387,8 @@ export type Database = {
           month?: number
           notes?: string | null
           paid_amount?: number
+          payment_type?: string
+          quote_id?: string | null
           subtotal?: number
           total?: number
           year?: number
@@ -393,6 +399,13 @@ export type Database = {
             columns: ["client_id"]
             isOneToOne: false
             referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "income_invoices_quote_id_fkey"
+            columns: ["quote_id"]
+            isOneToOne: false
+            referencedRelation: "quotes"
             referencedColumns: ["id"]
           },
         ]

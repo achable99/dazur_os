@@ -11,11 +11,12 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Plus, Pencil, Trash2, Search } from "lucide-react";
+import { Plus, Pencil, Trash2, Search, Eye } from "lucide-react";
 import { toast } from "sonner";
 import { fmtMXN, INVOICE_TYPES } from "@/lib/finance";
 import IncomeInvoiceDialog from "./IncomeInvoiceDialog";
 import CollectInvoiceDialog from "./CollectInvoiceDialog";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -25,7 +26,7 @@ type Invoice = {
   id: string; client_id: string; folio_fiscal: string; invoice_type: string;
   date: string; subtotal: number; iva: number; isr: number; total: number;
   is_collected: boolean; collected_date: string | null; notes: string | null;
-  month: number; year: number; paid_amount: number;
+  month: number; year: number; paid_amount: number; payment_type: "PUE" | "PPD"; quote_id: string | null;
 };
 
 const today = new Date();
@@ -67,6 +68,16 @@ export default function IncomeInvoicesTab() {
     },
   });
 
+  const { data: quotes } = useQuery({
+    queryKey: ["quotes_for_income_invoice"],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("quotes").select("id, number").order("number", { ascending: false });
+      if (error) throw error;
+      return data as { id: string; number: number }[];
+    },
+  });
+  const quoteMap = useMemo(() => new Map(quotes?.map((q) => [q.id, q.number]) ?? []), [quotes]);
+
   const clientMap = useMemo(() => {
     const m = new Map<string, { razon_social: string; rfc: string; tipo_persona: "fisica" | "moral" | null }>();
     clients?.forEach((c) => m.set(c.id, c));
@@ -82,11 +93,12 @@ export default function IncomeInvoicesTab() {
       if (estado === "pending" && i.is_collected) return false;
       if (s) {
         const cl = clientMap.get(i.client_id)?.razon_social.toLowerCase() ?? "";
-        if (!`${cl} ${i.folio_fiscal.toLowerCase()}`.includes(s)) return false;
+        const quoteNumber = i.quote_id ? String(quoteMap.get(i.quote_id) ?? "") : "";
+        if (!`${cl} ${i.folio_fiscal.toLowerCase()} ${quoteNumber}`.includes(s)) return false;
       }
       return true;
     });
-  }, [invoices, search, tipo, estado, clientMap]);
+  }, [invoices, search, tipo, estado, clientMap, quoteMap]);
 
   const totals = useMemo(() => filtered.reduce((acc, i) => ({
     subtotal: acc.subtotal + Number(i.subtotal),
@@ -118,6 +130,7 @@ export default function IncomeInvoicesTab() {
       qc.invalidateQueries({ queryKey: ["income_invoices"] });
       qc.invalidateQueries({ queryKey: ["all_income_invoices_fiscal"] });
       qc.invalidateQueries({ queryKey: ["cash_flow_entries"] });
+      qc.invalidateQueries({ queryKey: ["invoiced_quote_ids"] });
       toast.success("Factura eliminada");
       setDeleting(null);
     },
@@ -176,9 +189,8 @@ export default function IncomeInvoicesTab() {
                   <TableHead>Cliente</TableHead>
                   <TableHead>Folio</TableHead>
                   <TableHead>Tipo</TableHead>
-                  <TableHead className="text-right">Subtotal</TableHead>
-                  <TableHead className="text-right">IVA</TableHead>
-                  <TableHead className="text-right">ISR</TableHead>
+                  <TableHead>Tipo de pago</TableHead>
+                  <TableHead>Cotización</TableHead>
                   <TableHead className="text-right">Total</TableHead>
                   <TableHead>Fecha</TableHead>
                   <TableHead>Cobrada</TableHead>
@@ -200,10 +212,26 @@ export default function IncomeInvoicesTab() {
                         </Tooltip>
                       </TableCell>
                       <TableCell><Badge variant="secondary" className="font-normal">{i.invoice_type}</Badge></TableCell>
-                      <TableCell className="text-right tabular-nums">{fmtMXN(i.subtotal)}</TableCell>
-                      <TableCell className="text-right tabular-nums">{fmtMXN(i.iva)}</TableCell>
-                      <TableCell className="text-right tabular-nums">{fmtMXN(i.isr)}</TableCell>
-                      <TableCell className="text-right tabular-nums font-medium">{fmtMXN(i.total)}</TableCell>
+                      <TableCell><Badge variant="outline" className="font-normal">{i.payment_type}</Badge></TableCell>
+                      <TableCell>{i.quote_id && quoteMap.has(i.quote_id) ? `#${quoteMap.get(i.quote_id)}` : "—"}</TableCell>
+                      <TableCell className="text-right tabular-nums font-medium">
+                        <div className="flex items-center justify-end gap-1">
+                          {fmtMXN(i.total)}
+                          <Popover>
+                            <PopoverTrigger asChild>
+                              <Button variant="ghost" size="icon" className="h-7 w-7" aria-label={`Ver desglose de factura ${i.folio_fiscal}`}>
+                                <Eye className="h-4 w-4" />
+                              </Button>
+                            </PopoverTrigger>
+                            <PopoverContent align="end" className="w-52 space-y-2 text-sm">
+                              <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span>{fmtMXN(i.subtotal)}</span></div>
+                              <div className="flex justify-between"><span className="text-muted-foreground">IVA</span><span>{fmtMXN(i.iva)}</span></div>
+                              <div className="flex justify-between"><span className="text-muted-foreground">ISR</span><span>{fmtMXN(i.isr)}</span></div>
+                              <div className="border-t pt-2 flex justify-between font-semibold"><span>Total</span><span>{fmtMXN(i.total)}</span></div>
+                            </PopoverContent>
+                          </Popover>
+                        </div>
+                      </TableCell>
                       <TableCell className="text-sm tabular-nums">{i.date}</TableCell>
                       <TableCell>
                         {(() => {
@@ -260,6 +288,7 @@ export default function IncomeInvoicesTab() {
           onSaved={() => {
             qc.invalidateQueries({ queryKey: ["income_invoices"] });
             qc.invalidateQueries({ queryKey: ["all_income_invoices_fiscal"] });
+            qc.invalidateQueries({ queryKey: ["invoiced_quote_ids"] });
             // Editar una factura cobrada actualiza su entrada de flujo (trigger en DB)
             qc.invalidateQueries({ queryKey: ["cash_flow_entries"] });
             setEditing(undefined);
