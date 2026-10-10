@@ -4,10 +4,15 @@ import { Button } from "@/components/ui/button";
 import { Plus, ArrowLeft } from "lucide-react";
 import QuoteForm, { type QuoteForEdit } from "@/components/cotizador/QuoteForm";
 import QuotesList from "@/components/cotizador/QuotesList";
+import IncomeInvoiceDialog, { type QuoteInvoiceSeed } from "@/components/facturacion/IncomeInvoiceDialog";
+import { useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 
 export default function Cotizador() {
+  const qc = useQueryClient();
   // undefined = lista, null = nueva, QuoteForEdit = editar
   const [editing, setEditing] = useState<QuoteForEdit | null | undefined>(undefined);
+  const [invoiceQuote, setInvoiceQuote] = useState<QuoteInvoiceSeed | null>(null);
   const inForm = editing !== undefined;
 
   return (
@@ -43,7 +48,25 @@ export default function Cotizador() {
           />
         </Card>
       ) : (
-        <QuotesList onEdit={(q) => setEditing(q)} />
+        <QuotesList onEdit={(q) => setEditing(q)} onCreateInvoice={setInvoiceQuote} />
+      )}
+
+      {invoiceQuote && (
+        <IncomeInvoiceDialog
+          invoice={null}
+          quote={invoiceQuote}
+          defaultYear={new Date().getFullYear()}
+          defaultMonth={new Date().getMonth() + 1}
+          onClose={() => setInvoiceQuote(null)}
+          onSaved={() => {
+            qc.invalidateQueries({ queryKey: ["income_invoices"] });
+            qc.invalidateQueries({ queryKey: ["all_income_invoices_fiscal"] });
+            qc.invalidateQueries({ queryKey: ["cash_flow_entries"] });
+            qc.invalidateQueries({ queryKey: ["invoiced_quote_ids"] });
+            toast.success(`Cotización ${invoiceQuote.number} vinculada a la factura`);
+            setInvoiceQuote(null);
+          }}
+        />
       )}
     </div>
   );

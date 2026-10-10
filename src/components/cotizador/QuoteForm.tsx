@@ -233,6 +233,7 @@ export default function QuoteForm({ editing, onSaved, onCancel }: Props) {
     onSuccess: (number) => {
       toast.success(`Cotización ${number} guardada`);
       qc.invalidateQueries({ queryKey: ["quotes"] });
+      qc.invalidateQueries({ queryKey: ["quotes_for_income_invoice"] });
       onSaved();
     },
     onError: (e: Error) => toast.error("Error", { description: e.message }),

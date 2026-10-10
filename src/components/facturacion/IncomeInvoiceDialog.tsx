@@ -16,26 +16,45 @@ import { fmtMXN, INVOICE_TYPES, computeTotals, toLocalDateString, pctLabel, ISR_
 type Invoice = {
   id: string; client_id: string; folio_fiscal: string; invoice_type: string;
   date: string; subtotal: number; iva: number; isr: number; total: number;
-  notes: string | null; is_collected?: boolean;
+  notes: string | null; is_collected?: boolean; payment_type?: "PUE" | "PPD"; quote_id?: string | null;
+};
+
+export type QuoteInvoiceSeed = {
+  id: string;
+  number: number;
+  client_id: string | null;
+  subtotal: number;
+  iva: number;
+  isr: number;
+  total: number;
+  apply_iva: boolean;
+  apply_isr: boolean;
+  notes: string | null;
+  concepts: string[];
 };
 
 interface Props {
   invoice: Invoice | null;
+  quote?: QuoteInvoiceSeed | null;
   defaultYear: number;
   defaultMonth: number;
   onClose: () => void;
   onSaved: () => void;
 }
 
-export default function IncomeInvoiceDialog({ invoice, defaultYear, defaultMonth, onClose, onSaved }: Props) {
-  const [clientId, setClientId] = useState(invoice?.client_id ?? "");
+export default function IncomeInvoiceDialog({ invoice, quote, defaultYear, defaultMonth, onClose, onSaved }: Props) {
+  const [clientId, setClientId] = useState(invoice?.client_id ?? quote?.client_id ?? "");
   const [type, setType] = useState(invoice?.invoice_type ?? INVOICE_TYPES[0]);
   const [folio, setFolio] = useState(invoice?.folio_fiscal ?? "");
   const [date, setDate] = useState<Date | undefined>(
     invoice ? new Date(invoice.date + "T00:00:00") : new Date(defaultYear, defaultMonth - 1, new Date().getDate())
   );
-  const [subtotal, setSubtotal] = useState(invoice?.subtotal?.toString() ?? "");
-  const [notes, setNotes] = useState(invoice?.notes ?? "");
+  const [subtotal, setSubtotal] = useState(invoice?.subtotal?.toString() ?? quote?.subtotal?.toString() ?? "");
+  const [notes, setNotes] = useState(invoice?.notes ?? (quote
+    ? [`Cotización ${quote.number}`, ...quote.concepts.map((concept) => `• ${concept}`), quote.notes].filter(Boolean).join("\n")
+    : ""));
+  const [paymentType, setPaymentType] = useState<"PUE" | "PPD">(invoice?.payment_type ?? "PPD");
+  const [quoteId, setQuoteId] = useState(invoice?.quote_id ?? quote?.id ?? "none");
 
   const { data: clients, isLoading: clientsLoading } = useQuery({
     queryKey: ["clients"],
@@ -43,6 +62,15 @@ export default function IncomeInvoiceDialog({ invoice, defaultYear, defaultMonth
       const { data, error } = await supabase.from("clients").select("id, razon_social, rfc, tipo_persona").order("razon_social");
       if (error) throw error;
       return data as { id: string; razon_social: string; rfc: string; tipo_persona: "fisica" | "moral" | null }[];
+    },
+  });
+
+  const { data: quotes } = useQuery({
+    queryKey: ["quotes_for_income_invoice"],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("quotes").select("id, number").order("number", { ascending: false });
+      if (error) throw error;
+      return data;
     },
   });
 
@@ -54,9 +82,24 @@ export default function IncomeInvoiceDialog({ invoice, defaultYear, defaultMonth
   const sub = Number(subtotal) || 0;
   const calc = useMemo(() => {
     const subR = Number(sub.toFixed(2));
-    const { iva, isr, total } = computeTotals(subR, { applyIsr });
+    const subtotalUnchanged = invoice && Math.abs(subR - invoice.subtotal) < 0.005;
+    const clientUnchanged = invoice && clientId === invoice.client_id;
+    if (invoice && subtotalUnchanged && (invoice.quote_id || clientUnchanged)) {
+      return { subtotal: subR, iva: invoice.iva, isr: invoice.isr, total: invoice.total };
+    }
+    if (quote && Math.abs(subR - quote.subtotal) < 0.005) {
+      return { subtotal: subR, iva: quote.iva, isr: quote.isr, total: quote.total };
+    }
+    const preserveInvoiceTaxRules = !!invoice && (!!invoice.quote_id || clientId === invoice.client_id);
+    const taxOptions = preserveInvoiceTaxRules
+      ? { applyIva: invoice.iva > 0, applyIsr: invoice.isr > 0 }
+      : quote
+        ? { applyIva: quote.apply_iva, applyIsr: quote.apply_isr }
+        : { applyIsr };
+    const { iva, isr, total } = computeTotals(subR, taxOptions);
     return { subtotal: subR, iva, isr, total };
-  }, [sub, applyIsr]);
+  }, [sub, applyIsr, clientId, invoice, quote]);
+  const isrApplies = calc.isr > 0;
 
   // Si se está editando una factura ya cobrada y el recálculo difiere de los
   // montos guardados, guardar reescribirá esos montos y (vía trigger en DB)
@@ -87,6 +130,8 @@ export default function IncomeInvoiceDialog({ invoice, defaultYear, defaultMonth
         month: date.getMonth() + 1,
         year: date.getFullYear(),
         notes: notes.trim() || null,
+        payment_type: paymentType,
+        quote_id: quoteId === "none" ? null : quoteId,
       };
       if (invoice) {
         const { error } = await supabase.from("income_invoices").update(payload).eq("id", invoice.id);
@@ -141,14 +186,36 @@ export default function IncomeInvoiceDialog({ invoice, defaultYear, defaultMonth
               <Input id="sub" type="number" step="0.01" min="0.01" value={subtotal} onChange={(e) => setSubtotal(e.target.value)} required />
             </div>
           </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label>Tipo de pago *</Label>
+              <Select value={paymentType} onValueChange={(v) => setPaymentType(v as "PUE" | "PPD")}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="PUE">PUE — Pago en una sola exhibición</SelectItem>
+                  <SelectItem value="PPD">PPD — Pago en parcialidades o diferido</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Cotización relacionada</Label>
+              <Select value={quoteId} onValueChange={setQuoteId} disabled={!!quote}>
+                <SelectTrigger><SelectValue placeholder="Sin cotización" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Sin cotización</SelectItem>
+                  {quotes?.map((q) => <SelectItem key={q.id} value={q.id}>Cotización {q.number}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
           <div className="grid grid-cols-3 gap-3 p-3 rounded-md bg-muted/40">
             <div>
               <div className="text-xs text-muted-foreground">IVA (16%)</div>
               <div className="tabular-nums font-medium">{fmtMXN(calc.iva)}</div>
             </div>
             <div>
-              <div className="text-xs text-muted-foreground">{applyIsr ? `ISR (${pctLabel(ISR_RATE)})` : "ISR"}</div>
-              <div className="tabular-nums font-medium">{applyIsr ? fmtMXN(calc.isr) : "No aplica"}</div>
+              <div className="text-xs text-muted-foreground">{isrApplies ? `ISR (${pctLabel(ISR_RATE)})` : "ISR"}</div>
+              <div className="tabular-nums font-medium">{isrApplies ? fmtMXN(calc.isr) : "No aplica"}</div>
             </div>
             <div>
               <div className="text-xs text-muted-foreground">Total</div>
